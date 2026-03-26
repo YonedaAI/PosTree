@@ -181,10 +181,24 @@ function cmdPlatforms() {
 
 async function cmdGenerate(args: string[]) {
   const flags = parseFlags(args);
-  const source = flags['from'] ?? flags['source'] ?? args.find(a => !a.startsWith('--'));
+  const source = flags['from'] ?? flags['source'] ?? flags['text'] ?? args.find(a => !a.startsWith('--'));
 
   if (!source) {
-    console.error('Usage: postree generate --from <file> [--platforms twitter,linkedin,medium] [--dir posts/] [--schedule tomorrow] [--spread 14]');
+    console.error(`Usage:
+  postree generate --from <file.md> [options]     Generate from a file
+  postree generate --text "your content" [options] Generate from raw text
+  postree generate --from <file> --llm openai     Use OpenAI instead of Claude
+  postree generate --from <file> --llm haiku      Use Claude Haiku (fast + cheap)
+  postree generate --from <file> --llm gemini     Use Gemini
+
+Options:
+  --platforms <list>  Comma-separated (default: twitter,linkedin,mastodon,bluesky)
+  --dir <path>        Output directory (default: posts/)
+  --schedule <date>   Base schedule date (ISO or "tomorrow")
+  --spread <days>     Spread posts over N days (default: 14)
+  --llm <provider>    claude, haiku, openai, gemini (default: auto-detect)
+  --model <name>      Specific model override
+  --name <base>       Base name for output files`);
     process.exit(1);
   }
 
@@ -193,8 +207,12 @@ async function cmdGenerate(args: string[]) {
   const outputDir = flags['dir'] ?? 'posts';
   const schedule = flags['schedule'];
   const spreadDays = flags['spread'] ? parseInt(flags['spread']) : 14;
+  const llm = flags['llm'] as any;
+  const model = flags['model'];
+  const name = flags['name'];
 
-  console.log(`Generating posts from: ${source}`);
+  const isFile = !flags['text'];
+  console.log(`Generating posts from: ${isFile ? source : '"' + source.slice(0, 60) + (source.length > 60 ? '...' : '') + '"'}`);
   console.log(`Platforms: ${platforms.join(', ')}`);
   console.log(`Output: ${outputDir}/\n`);
 
@@ -205,6 +223,9 @@ async function cmdGenerate(args: string[]) {
     outputDir,
     schedule,
     spreadDays,
+    llm,
+    model,
+    name,
   });
 
   console.log(`\nGenerated ${files.length} posts.`);
@@ -386,12 +407,16 @@ Usage:
   postree publish --file X      Publish a specific file
   postree publish --dir X       Posts directory (default: posts/)
 
-  postree generate [options]    Generate platform-specific posts via Claude
-    --from <file>               Source content file
-    --platforms <list>          Comma-separated platforms (default: twitter,linkedin,mastodon,bluesky)
+  postree generate [options]    Generate platform-specific posts via LLM
+    --from <file>               Source content file (paper, markdown, etc.)
+    --text "content"            Raw text input (instead of file)
+    --platforms <list>          Comma-separated (default: twitter,linkedin,mastodon,bluesky)
+    --llm <provider>            claude, haiku, openai, gemini (default: auto-detect)
+    --model <name>              Specific model override
     --dir <path>               Output directory (default: posts/)
     --schedule <date>          Base schedule date (ISO or "tomorrow")
     --spread <days>            Spread posts over N days (default: 14)
+    --name <base>              Base name for output files
 
   postree status                Show publishing history
   postree dry-run [dir]         Preview what would be published

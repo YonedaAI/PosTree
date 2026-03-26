@@ -126,8 +126,8 @@ describe('generatePosts', () => {
     });
 
     expect(files).toHaveLength(2);
-    expect(fs.existsSync(path.join(outputDir, 'twitter-generated.md'))).toBe(true);
-    expect(fs.existsSync(path.join(outputDir, 'linkedin-generated.md'))).toBe(true);
+    expect(fs.existsSync(path.join(outputDir, 'twitter-source.md'))).toBe(true);
+    expect(fs.existsSync(path.join(outputDir, 'linkedin-source.md'))).toBe(true);
   });
 
   it('creates files with correct frontmatter', () => {

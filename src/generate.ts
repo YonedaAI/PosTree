@@ -3,13 +3,18 @@ import * as path from 'node:path';
 import { Platform } from './types.js';
 import { execFileSync } from 'node:child_process';
 
-interface GenerateOptions {
-  source: string;           // path to source content (markdown, URL, or text)
-  platforms: Platform[];    // which platforms to generate for
-  outputDir: string;        // where to write generated posts
-  schedule?: string;        // optional base schedule date
-  spreadDays?: number;      // spread posts over N days
+export type LLMProvider = 'claude' | 'haiku' | 'openai' | 'gemini' | 'fallback';
+
+export interface GenerateOptions {
+  source: string;           // file path OR raw text
+  platforms: Platform[];
+  outputDir: string;
+  schedule?: string;
+  spreadDays?: number;
   dryRun?: boolean;
+  llm?: LLMProvider;        // which LLM to use
+  model?: string;           // specific model override
+  name?: string;            // base name for output files
 }
 
 // Platform-specific constraints
@@ -26,11 +31,104 @@ export const PLATFORM_CONSTRAINTS: Record<Platform, { maxLength: number; format:
   discourse: { maxLength: 32000, format: 'technical', supportsThread: false, supportsArticle: false },
 };
 
-export function generatePosts(options: GenerateOptions): string[] {
-  const { source, platforms, outputDir, schedule, spreadDays } = options;
+/**
+ * Resolve source: if it's a file path, read it. If it's raw text, use as-is.
+ */
+function resolveSource(source: string): string {
+  // Check if it's a file path
+  try {
+    if (fs.existsSync(source)) {
+      return fs.readFileSync(source, 'utf-8');
+    }
+  } catch { /* not a file path */ }
 
-  // Read source content
-  const content = fs.readFileSync(source, 'utf-8');
+  // It's raw text
+  return source;
+}
+
+/**
+ * Call an LLM to generate content.
+ * Supports: claude, haiku (claude with haiku model), openai, gemini
+ * Falls back gracefully if the LLM isn't available.
+ */
+function callLLM(prompt: string, provider: LLMProvider, model?: string): string {
+  switch (provider) {
+    case 'claude':
+    case 'haiku': {
+      const args = ['-p', prompt];
+      if (provider === 'haiku') args.push('--model', model ?? 'claude-haiku-4-5-20251001');
+      else if (model) args.push('--model', model);
+      const result = execFileSync('claude', args, {
+        encoding: 'utf-8',
+        timeout: 90000,
+        maxBuffer: 2 * 1024 * 1024,
+      });
+      return result.trim();
+    }
+
+    case 'openai': {
+      // Use OpenAI API via curl (requires OPENAI_API_KEY in env)
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) throw new Error('OPENAI_API_KEY not set in environment');
+      const modelName = model ?? 'gpt-4o';
+      const body = JSON.stringify({
+        model: modelName,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 4096,
+      });
+      const result = execFileSync('curl', [
+        '-s', 'https://api.openai.com/v1/chat/completions',
+        '-H', `Authorization: Bearer ${apiKey}`,
+        '-H', 'Content-Type: application/json',
+        '-d', body,
+      ], { encoding: 'utf-8', timeout: 90000 });
+      const parsed = JSON.parse(result);
+      if (parsed.error) throw new Error(parsed.error.message);
+      return parsed.choices[0].message.content.trim();
+    }
+
+    case 'gemini': {
+      // Use gemini CLI
+      const args = model ? ['-m', model, '-p', prompt] : ['-p', prompt];
+      const result = execFileSync('gemini', args, {
+        encoding: 'utf-8',
+        timeout: 90000,
+        maxBuffer: 2 * 1024 * 1024,
+      });
+      return result.trim();
+    }
+
+    case 'fallback':
+      throw new Error('Fallback — no LLM called');
+
+    default:
+      throw new Error(`Unknown LLM provider: ${provider}`);
+  }
+}
+
+/**
+ * Detect which LLM providers are available on this system.
+ */
+export function detectProviders(): LLMProvider[] {
+  const available: LLMProvider[] = [];
+
+  try { execFileSync('which', ['claude'], { encoding: 'utf-8', stdio: 'pipe' }); available.push('claude', 'haiku'); } catch {}
+  try { execFileSync('which', ['gemini'], { encoding: 'utf-8', stdio: 'pipe' }); available.push('gemini'); } catch {}
+  if (process.env.OPENAI_API_KEY) available.push('openai');
+
+  available.push('fallback');
+  return available;
+}
+
+export function generatePosts(options: GenerateOptions): string[] {
+  const { source, platforms, outputDir, schedule, spreadDays, llm, model, name } = options;
+
+  // Resolve source: file path or raw text
+  const content = resolveSource(source);
+
+  // Pick LLM provider
+  const provider = llm ?? detectProviders()[0] ?? 'fallback';
+  console.log(`  LLM: ${provider}${model ? ` (${model})` : ''}`);
 
   // Ensure output dir exists
   if (!fs.existsSync(outputDir)) {
@@ -39,6 +137,7 @@ export function generatePosts(options: GenerateOptions): string[] {
 
   const createdFiles: string[] = [];
   const baseDate = schedule ? new Date(schedule) : new Date();
+  const baseName = name ?? deriveBaseName(source);
 
   for (let i = 0; i < platforms.length; i++) {
     const platform = platforms[i];
@@ -52,25 +151,19 @@ export function generatePosts(options: GenerateOptions): string[] {
         const dayOffset = Math.floor((i / platforms.length) * (spreadDays || 14));
         postDate.setDate(postDate.getDate() + dayOffset);
       }
-      postDate.setHours(10, 0, 0, 0); // Default 10am
+      postDate.setHours(10, 0, 0, 0);
       scheduleDate = postDate.toISOString();
     }
 
-    // Generate platform-specific content using Claude
+    // Generate platform-specific content via LLM
     const prompt = buildGenerationPrompt(content, platform, constraints);
     let generatedContent: string;
 
     try {
-      // Use claude CLI to generate the post
-      const result = execFileSync('claude', ['-p', prompt], {
-        encoding: 'utf-8',
-        timeout: 60000,
-        maxBuffer: 1024 * 1024
-      });
-      generatedContent = result.trim();
+      generatedContent = callLLM(prompt, provider, model);
     } catch (_err) {
-      // Fallback: use the source content directly, truncated
-      console.log(`  [WARN] Claude generation failed for ${platform}, using source content`);
+      // Fallback: truncate source content for the platform
+      console.log(`  [WARN] ${provider} generation failed for ${platform}, using source content`);
       generatedContent = truncateForPlatform(content, constraints);
     }
 
@@ -88,16 +181,29 @@ export function generatePosts(options: GenerateOptions): string[] {
     ].filter(Boolean).join('\n');
 
     const fileContent = `${frontmatter}\n${generatedContent}\n`;
-    const fileName = `${platform}-generated.md`;
+    const fileName = `${platform}-${baseName}.md`;
     const filePath = path.join(outputDir, fileName);
 
     fs.writeFileSync(filePath, fileContent);
     createdFiles.push(filePath);
 
-    console.log(`  \u2713 Generated ${platform} post \u2192 ${fileName}${scheduleDate ? ` (scheduled: ${scheduleDate.split('T')[0]})` : ''}`);
+    console.log(`  ✓ Generated ${platform} post → ${fileName}${scheduleDate ? ` (scheduled: ${scheduleDate.split('T')[0]})` : ''}`);
   }
 
   return createdFiles;
+}
+
+/**
+ * Derive a base name for output files from the source.
+ * File path → filename without extension. Raw text → "post".
+ */
+function deriveBaseName(source: string): string {
+  try {
+    if (fs.existsSync(source)) {
+      return path.basename(source, path.extname(source));
+    }
+  } catch {}
+  return 'generated';
 }
 
 export function buildGenerationPrompt(content: string, platform: Platform, constraints: { maxLength: number; format: string; supportsThread: boolean }): string {
