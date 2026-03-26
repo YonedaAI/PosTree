@@ -18,6 +18,7 @@ async function main() {
     case 'dry-run': return cmdDryRun(args.slice(1));
     case 'platforms': return cmdPlatforms();
     case 'schedule': return cmdSchedule(args.slice(1));
+    case 'generate': return cmdGenerate(args.slice(1));
     case 'version': return console.log(`postree v${VERSION}`);
     case 'help': return printHelp();
     default:
@@ -178,10 +179,61 @@ function cmdPlatforms() {
   }
 }
 
-function cmdSchedule(args: string[]) {
+async function cmdGenerate(args: string[]) {
+  const flags = parseFlags(args);
+  const source = flags['from'] ?? flags['source'] ?? args.find(a => !a.startsWith('--'));
+
+  if (!source) {
+    console.error('Usage: postree generate --from <file> [--platforms twitter,linkedin,medium] [--dir posts/] [--schedule tomorrow] [--spread 14]');
+    process.exit(1);
+  }
+
+  const platformsStr = flags['platforms'] ?? 'twitter,linkedin,mastodon,bluesky';
+  const platforms = platformsStr.split(',').map(s => s.trim()) as Platform[];
+  const outputDir = flags['dir'] ?? 'posts';
+  const schedule = flags['schedule'];
+  const spreadDays = flags['spread'] ? parseInt(flags['spread']) : 14;
+
+  console.log(`Generating posts from: ${source}`);
+  console.log(`Platforms: ${platforms.join(', ')}`);
+  console.log(`Output: ${outputDir}/\n`);
+
+  const { generatePosts } = await import('./generate.js');
+  const files = generatePosts({
+    source,
+    platforms,
+    outputDir,
+    schedule,
+    spreadDays,
+  });
+
+  console.log(`\nGenerated ${files.length} posts.`);
+  console.log('Run `postree dry-run` to preview, or `postree publish --pending` to publish.');
+}
+
+async function cmdSchedule(args: string[]) {
   const subcommand = args[0];
   const postsDir = 'posts';
   const projectPath = process.cwd();
+
+  if (subcommand === 'assign') {
+    const { assignSchedules } = await import('./scheduler.js');
+    const flags = parseFlags(args.slice(1));
+    assignSchedules({
+      postsDir: flags['dir'] ?? 'posts',
+      startDate: flags['start'] ?? 'tomorrow',
+      spreadDays: parseInt(flags['spread'] ?? '14'),
+      timeOfDay: flags['time'] ?? '10:00',
+      overwrite: args.includes('--overwrite'),
+    });
+    return;
+  }
+
+  // If args look like a schedule spec, create the trigger
+  const timeArg = args.find(a => !a.startsWith('--'));
+  if (timeArg && timeArg !== 'list' && timeArg !== 'show') {
+    return createTrigger(args);
+  }
 
   if (subcommand === 'list') {
     // List all posts with their schedule dates
@@ -268,6 +320,49 @@ COMMANDS:
 `);
 }
 
+async function createTrigger(args: string[]) {
+  const flags = parseFlags(args);
+  const postsDir = flags['dir'] ?? flags['repo'] ?? 'posts';
+  const projectPath = process.cwd();
+  const fullPostsPath = path.resolve(projectPath, postsDir);
+
+  // Parse time specification
+  const timeSpec = args.filter(a => !a.startsWith('--')).join(' ');
+  // e.g., "10am everyday", "daily at 10am", "9am weekdays"
+
+  const schedulePrompt = `cd ${projectPath} && npx postree publish --pending --dir ${postsDir} && npx postree status`;
+
+  console.log('Creating Claude Code scheduled trigger...\n');
+  console.log(`  Schedule: ${timeSpec}`);
+  console.log(`  Posts dir: ${fullPostsPath}`);
+  console.log(`  Command: ${schedulePrompt}\n`);
+
+  // Try to invoke claude CLI to create the schedule
+  try {
+    const { execFileSync } = await import('node:child_process');
+
+    // Use claude CLI with /schedule command
+    const claudePrompt = `/schedule ${timeSpec}: ${schedulePrompt}. After publishing, report what was posted and any failures to Telegram.`;
+
+    console.log('Invoking Claude Code to create trigger...');
+    console.log(`  claude -p "${claudePrompt}"\n`);
+
+    const result = execFileSync('claude', ['-p', claudePrompt], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+
+    console.log('Trigger created successfully!');
+    console.log(result);
+  } catch (_err: any) {
+    // If claude CLI isn't available or fails, print manual instructions
+    console.log('Could not auto-create trigger. Run this manually in Claude Code:\n');
+    console.log(`  /schedule ${timeSpec}: ${schedulePrompt}\n`);
+    console.log('Or visit claude.ai/code/scheduled to set it up via web.');
+  }
+}
+
 function parseFlags(args: string[]): Record<string, string> {
   const flags: Record<string, string> = {};
   for (let i = 0; i < args.length; i++) {
@@ -291,11 +386,26 @@ Usage:
   postree publish --file X      Publish a specific file
   postree publish --dir X       Posts directory (default: posts/)
 
+  postree generate [options]    Generate platform-specific posts via Claude
+    --from <file>               Source content file
+    --platforms <list>          Comma-separated platforms (default: twitter,linkedin,mastodon,bluesky)
+    --dir <path>               Output directory (default: posts/)
+    --schedule <date>          Base schedule date (ISO or "tomorrow")
+    --spread <days>            Spread posts over N days (default: 14)
+
   postree status                Show publishing history
   postree dry-run [dir]         Preview what would be published
   postree platforms             Show configured platforms
-  postree schedule              Set up Claude auto-scheduling
-  postree schedule list         List scheduled posts
+
+  postree schedule <time>       Create Claude Code auto-publish trigger
+    postree schedule 10am everyday
+    postree schedule "daily at 10am"
+  postree schedule assign       Auto-assign schedule dates to posts
+    --start <date>             Start date (default: tomorrow)
+    --spread <days>            Spread over N days (default: 14)
+    --time <HH:MM>             Time of day (default: 10:00)
+    --overwrite                Overwrite existing schedules
+  postree schedule list         List all scheduled posts
   postree schedule show         Show trigger configuration
 
   postree version               Show version
