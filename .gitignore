@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.env
+.postree-state.json
+*.js.map

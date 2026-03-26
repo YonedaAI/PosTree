@@ -1,0 +1,23 @@
+{
+  "name": "postree",
+  "version": "0.1.0",
+  "description": "Plant your posts everywhere — multi-platform social media publishing CLI",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "postree": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "dev": "tsc --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0",
+    "@types/node": "^22.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0"
+  }
+}
