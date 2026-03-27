@@ -69,6 +69,7 @@ export interface ArticleOptions {
 }
 
 export interface PosTreeConfig {
+  postiz?: { baseUrl: string; apiKey: string };
   twitter?: { apiKey: string; apiSecret: string; accessToken: string; accessSecret: string };
   mastodon?: { instanceUrl: string; accessToken: string };
   bluesky?: { handle: string; appPassword: string };

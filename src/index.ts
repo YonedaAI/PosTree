@@ -17,6 +17,7 @@ async function main() {
     case 'status': return cmdStatus(args.slice(1));
     case 'dry-run': return cmdDryRun(args.slice(1));
     case 'platforms': return cmdPlatforms();
+    case 'setup': return cmdSetup();
     case 'schedule': return cmdSchedule(args.slice(1));
     case 'generate': return cmdGenerate(args.slice(1));
     case 'version': return console.log(`postree v${VERSION}`);
@@ -26,6 +27,55 @@ async function main() {
       console.error(`Unknown command: ${command}`);
       process.exit(1);
   }
+}
+
+function cmdSetup() {
+  console.log(`
+PosTree Setup — Postiz Backend
+═══════════════════════════════
+
+Postiz is a free, open-source social media scheduler.
+PosTree uses it to handle all OAuth and platform connections.
+
+STEP 1: Start Postiz (Docker required)
+───────────────────────────────────────
+  cd ${process.cwd()}/docker
+  docker-compose up -d
+
+  Wait ~30 seconds for startup.
+
+STEP 2: Connect your social accounts
+─────────────────────────────────────
+  Open http://localhost:5000 in your browser
+  Create an account
+  Go to Settings → Integrations
+  Connect: Twitter, LinkedIn, Facebook, etc.
+  (Postiz handles all OAuth — just click and authorize)
+
+STEP 3: Get your API key
+─────────────────────────
+  In Postiz dashboard: Settings → API Keys → Generate
+  Copy the key
+
+STEP 4: Configure PosTree
+──────────────────────────
+  Add to your .env file:
+
+    POSTIZ_URL=http://localhost:3000
+    POSTIZ_API_KEY=your-key-here
+
+STEP 5: Test
+────────────
+  postree platforms        # Should show all connected platforms
+  postree dry-run posts/   # Preview posts
+  postree publish --file posts/test.md   # Test publish
+
+STEP 6: Schedule auto-publishing
+─────────────────────────────────
+  postree schedule 10am everyday
+
+Done! Postiz handles all the OAuth. PosTree handles the content.
+`);
 }
 
 async function cmdPublish(args: string[]) {
@@ -417,6 +467,8 @@ Usage:
     --schedule <date>          Base schedule date (ISO or "tomorrow")
     --spread <days>            Spread posts over N days (default: 14)
     --name <base>              Base name for output files
+
+  postree setup                  Set up Postiz backend (recommended)
 
   postree status                Show publishing history
   postree dry-run [dir]         Preview what would be published

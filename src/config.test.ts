@@ -11,7 +11,7 @@ describe('loadConfig', () => {
       if (key.startsWith('TWITTER_') || key.startsWith('MASTODON_') || key.startsWith('BLUESKY_') ||
           key.startsWith('LINKEDIN_') || key.startsWith('DEVTO_') || key.startsWith('MEDIUM_') ||
           key.startsWith('FACEBOOK_') || key.startsWith('REDDIT_') || key.startsWith('DISCORD_') ||
-          key.startsWith('DISCOURSE_')) {
+          key.startsWith('DISCOURSE_') || key.startsWith('POSTIZ_')) {
         delete process.env[key];
       }
     }
@@ -23,7 +23,7 @@ describe('loadConfig', () => {
       if (key.startsWith('TWITTER_') || key.startsWith('MASTODON_') || key.startsWith('BLUESKY_') ||
           key.startsWith('LINKEDIN_') || key.startsWith('DEVTO_') || key.startsWith('MEDIUM_') ||
           key.startsWith('FACEBOOK_') || key.startsWith('REDDIT_') || key.startsWith('DISCORD_') ||
-          key.startsWith('DISCOURSE_')) {
+          key.startsWith('DISCOURSE_') || key.startsWith('POSTIZ_')) {
         delete process.env[key];
       }
     }

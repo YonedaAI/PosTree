@@ -5,15 +5,41 @@
 Write posts as markdown with frontmatter. PosTree publishes them to 10 platforms.
 Claude Code schedules the publishing automatically.
 
-## Quick Start
+## Setup
+
+### Quick Start with Postiz (recommended)
+
+PosTree uses [Postiz](https://github.com/gitroomhq/postiz-app) — a free, open-source social media scheduler — to handle all platform authentication.
+
+```bash
+# 1. Start Postiz
+cd docker && docker-compose up -d
+
+# 2. Connect your social accounts
+open http://localhost:5000
+# → Settings → Integrations → Connect Twitter, LinkedIn, Facebook, etc.
+
+# 3. Get your API key
+# → Settings → API Keys → Generate
+
+# 4. Configure PosTree
+echo "POSTIZ_URL=http://localhost:3000" >> .env
+echo "POSTIZ_API_KEY=your-key" >> .env
+
+# 5. Test
+postree platforms
+postree publish --file posts/test.md
+```
+
+### Alternative: Direct API Keys
+
+If you prefer not to run Postiz, configure individual platform API keys in `.env`. See `.env.example` for all options.
+
+### Quick Start (CLI)
 
 ```bash
 # Install
 npm install -g postree
-
-# Configure API keys
-cp .env.example .env
-# Edit .env with your API keys
 
 # Preview what would be published
 postree dry-run posts/
@@ -127,7 +153,9 @@ PosTree doesn't run its own cron. Instead, **Claude Code** runs `postree publish
 
 ## Configuration
 
-Copy `.env.example` to `.env` and add your API keys:
+**With Postiz (recommended):** Run `postree setup` for guided instructions. One Docker container handles all platforms.
+
+**Without Postiz:** Copy `.env.example` to `.env` and add individual platform API keys:
 
 ```bash
 cp .env.example .env

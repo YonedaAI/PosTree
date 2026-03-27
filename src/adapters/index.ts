@@ -9,6 +9,7 @@ import { createFacebookAdapter } from './facebook.js';
 import { createRedditAdapter } from './reddit.js';
 import { createDiscordAdapter } from './discord.js';
 import { createDiscourseAdapter } from './discourse.js';
+import { createPostizAdapter } from './postiz.js';
 
 const adapterFactories: Record<Platform, (config: PosTreeConfig) => PlatformAdapter | null> = {
   twitter: (c) => createTwitterAdapter(c),
@@ -24,6 +25,12 @@ const adapterFactories: Record<Platform, (config: PosTreeConfig) => PlatformAdap
 };
 
 export function getAdapter(platform: Platform, config: PosTreeConfig): PlatformAdapter | null {
+  // Prefer Postiz if configured (handles all platforms via one backend)
+  if (config.postiz) {
+    return createPostizAdapter(config.postiz, platform);
+  }
+
+  // Fall back to individual platform adapters
   const factory = adapterFactories[platform];
   return factory ? factory(config) : null;
 }

@@ -6,6 +6,13 @@ export function loadConfig(envPath?: string): PosTreeConfig {
 
   const config: PosTreeConfig = {};
 
+  if (process.env.POSTIZ_API_KEY) {
+    config.postiz = {
+      baseUrl: process.env.POSTIZ_URL ?? 'http://localhost:3000',
+      apiKey: process.env.POSTIZ_API_KEY,
+    };
+  }
+
   if (process.env.TWITTER_API_KEY) {
     config.twitter = {
       apiKey: process.env.TWITTER_API_KEY!,

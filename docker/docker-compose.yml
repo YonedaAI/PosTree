@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  postiz:
+    image: ghcr.io/gitroomhq/postiz-app:latest
+    container_name: postiz
+    restart: unless-stopped
+    ports:
+      - "3000:3000"    # API
+      - "5000:5000"    # Web UI
+    environment:
+      - DATABASE_URL=postgresql://postiz:postiz@postgres:5432/postiz
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=your-secret-change-this
+      - FRONTEND_URL=http://localhost:5000
+      - BACKEND_URL=http://localhost:3000
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postiz-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postiz
+      POSTGRES_PASSWORD: postiz
+      POSTGRES_DB: postiz
+    volumes:
+      - postiz-db:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: postiz-redis
+    restart: unless-stopped
+
+volumes:
+  postiz-db:
