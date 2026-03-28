@@ -90,16 +90,19 @@ function postizExec(args: string[]): string {
  * Falls back to runtime query if not in .env.
  */
 function getChannelIds(platform: string): string[] {
-  // Try exact match first (e.g., linkedin_page -> POSTIZ_LINKEDIN_PAGE)
-  const exactKey = `POSTIZ_${platform.toUpperCase().replace(/-/g, '_')}`;
-  const exactVal = process.env[exactKey];
-  if (exactVal) return exactVal.split(',').map(s => s.trim()).filter(Boolean);
+  const ids: string[] = [];
+  const key = platform.toUpperCase().replace(/-/g, '_');
 
-  // Try base platform (e.g., linkedin_page -> POSTIZ_LINKEDIN)
-  const basePlatform = platform.split(/[-_]/)[0];
-  const baseKey = `POSTIZ_${basePlatform.toUpperCase()}`;
-  const baseVal = process.env[baseKey];
-  if (baseVal) return baseVal.split(',').map(s => s.trim()).filter(Boolean);
+  // Collect all matching env vars: POSTIZ_LINKEDIN, POSTIZ_LINKEDIN_PAGE, etc.
+  for (const [envKey, envVal] of Object.entries(process.env)) {
+    if (!envVal || !envKey.startsWith('POSTIZ_') || envKey.startsWith('POSTIZ_API_')) continue;
+    const envPlatform = envKey.replace('POSTIZ_', '');
+    // Match exact (LINKEDIN -> linkedin) or prefix (LINKEDIN_PAGE -> linkedin)
+    if (envPlatform === key || envPlatform.startsWith(key + '_') || key.startsWith(envPlatform + '_')) {
+      ids.push(...envVal.split(',').map(s => s.trim()).filter(Boolean));
+    }
+  }
+  if (ids.length > 0) return [...new Set(ids)];
 
   // Fallback: query integrations at runtime
   try {
