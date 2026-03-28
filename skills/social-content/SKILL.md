@@ -27,6 +27,7 @@ Post content here.
 - `type`: post | thread | article
 - `status`: pending | published | draft
 - `schedule`: ISO datetime (optional)
+- `image`: URL or local path to attach (optional, auto-detected from OG tags if post contains a URL)
 - `tags`: array of tags (optional)
 - `title`: article title (for devto, medium, hashnode, wordpress)
 

@@ -5,6 +5,7 @@ export interface Post {
   tags?: string[];
   status: 'pending' | 'published' | 'draft';
   title?: string;
+  image?: string;           // URL or local path to attach
   content: string;
   thread?: string[];
   file: string;

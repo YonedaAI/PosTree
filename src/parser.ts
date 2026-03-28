@@ -18,6 +18,7 @@ export function parsePostFile(filePath: string): Post {
     tags: meta.tags,
     status: meta.status ?? 'pending',
     title: meta.title,
+    image: meta.image,
     content: body,
     thread,
     file: filePath,

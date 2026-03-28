@@ -12,7 +12,7 @@ const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
-const VERSION = '0.3.4';
+const VERSION = '0.3.5';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -266,6 +266,7 @@ async function cmdGenerate(args: string[]) {
     llm: flags['llm'] as any,
     model: flags['model'],
     name: flags['name'],
+    image: flags['image'],
   });
 
   console.log(`\nGenerated ${files.length} posts in ${outputDir}/`);
@@ -320,19 +321,60 @@ async function cmdPublish(args: string[]) {
       continue;
     }
 
-    console.log(`  [POST] ${post.platform} <- ${path.basename(post.file)} (${ids.length} channel(s))`);
+    console.log(`  [POST] ${post.platform} <- ${path.basename(post.file)} (${ids.length} channel(s))${post.image ? ' + image' : ''}`);
+
+    // Resolve image: upload local file, or use URL directly
+    let imageUrl: string | undefined;
+    if (post.image) {
+      if (post.image.startsWith('http')) {
+        imageUrl = post.image;
+      } else {
+        // Local file — resolve relative to post file's directory
+        const imgPath = path.isAbsolute(post.image) ? post.image : path.resolve(path.dirname(post.file), post.image);
+        if (fs.existsSync(imgPath)) {
+          console.log(`    uploading ${path.basename(imgPath)}...`);
+          const uploadResult = postizExec(['upload', imgPath]);
+          const uploadJson = uploadResult.match(/\{[\s\S]*\}/);
+          if (uploadJson) {
+            const uploaded = JSON.parse(uploadJson[0]);
+            imageUrl = uploaded.path;
+          }
+        } else {
+          console.log(`    [WARN] image not found: ${imgPath}`);
+        }
+      }
+    }
+
+    // Auto-detect OG image from URLs in content if no image specified
+    if (!imageUrl) {
+      const urlMatch = post.content.match(/https?:\/\/[^\s]+/);
+      if (urlMatch) {
+        try {
+          const res = await fetch(urlMatch[0]);
+          const html = await res.text();
+          const ogMatch = html.match(/property="og:image"\s+content="([^"]+)"/);
+          if (ogMatch) {
+            imageUrl = ogMatch[1];
+            console.log(`    auto-detected OG image from ${urlMatch[0]}`);
+          }
+        } catch { /* no OG image, that's fine */ }
+      }
+    }
 
     // Use post's schedule date, or 5s from now if none (Temporal requires schedule type)
     const schedDate = post.schedule ?? new Date(Date.now() + 5000).toISOString();
 
     try {
-      const result = postizExec([
+      const postizArgs = [
         'posts:create',
         '-c', post.content,
         '-s', schedDate,
         '-t', 'schedule',
         '-i', ids.join(','),
-      ]);
+      ];
+      if (imageUrl) postizArgs.push('-m', imageUrl);
+
+      const result = postizExec(postizArgs);
 
       const jsonMatch = result.match(/\[[\s\S]*\]/);
       if (jsonMatch) {

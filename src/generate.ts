@@ -12,6 +12,7 @@ export interface GenerateOptions {
   llm?: LLMProvider;
   model?: string;
   name?: string;
+  image?: string;          // URL or local path to attach to posts
 }
 
 // Platform constraints
@@ -281,6 +282,7 @@ export async function generatePosts(options: GenerateOptions): Promise<string[]>
       `platform: ${platform}`,
       `type: ${type}`,
       scheduleDate ? `schedule: ${scheduleDate}` : null,
+      options.image ? `image: ${options.image}` : null,
       `status: pending`,
       '---',
     ].filter(Boolean).join('\n');

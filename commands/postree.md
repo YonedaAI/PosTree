@@ -10,6 +10,8 @@ arguments:
     description: "Base schedule date (ISO or 'tomorrow')"
   - name: "--spread"
     description: "Spread posts over N days (default: 14)"
+  - name: "--image"
+    description: "URL or local path to image to attach to posts"
 ---
 
 Generate platform-specific social media posts from the given source content.
