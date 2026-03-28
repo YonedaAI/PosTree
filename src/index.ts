@@ -12,7 +12,7 @@ const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
-const VERSION = '0.3.7';
+const VERSION = '0.3.8';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -458,9 +458,14 @@ Setup:
   postree init                Set up repo (.env, channels, posts/)
 
 Content:
-  postree generate --from <file> [--platforms list] [--llm provider]
+  postree generate --from <file> [--platforms list] [--llm provider] [--image url]
   postree generate --text "content" --platforms twitter,linkedin
   postree publish [--pending] [--file X] [--dir X] [--platform X]
+
+  Image options (in post frontmatter):
+    image: https://example.com/og.png    Attach URL
+    image: ./local-file.png              Upload and attach
+    image: auto                          Fetch OG image from first URL in post
 
 Schedule:
   postree schedule assign [--start date] [--spread days] [--time HH:MM]

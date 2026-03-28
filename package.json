@@ -1,6 +1,6 @@
 {
   "name": "@yonedaai/postree",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Generate platform-specific social media posts from source content, publish via Postiz",
   "type": "module",
   "main": "dist/index.js",
