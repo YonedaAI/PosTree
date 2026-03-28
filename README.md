@@ -20,11 +20,21 @@ LinkedIn, Twitter/X, Mastodon, Bluesky, Instagram, YouTube, TikTok, ...
 
 ## Install
 
+### CLI
+
 ```bash
 npm install -g @yonedaai/postree
 ```
 
-This installs both `postree` CLI and the bundled Postiz CLI.
+This installs the `postree` CLI with bundled Postiz CLI, Anthropic SDK, OpenAI SDK, and Gemini SDK.
+
+### Claude Code Plugin
+
+```bash
+claude plugin add /path/to/PosTree
+```
+
+This adds `/postree` and `/postree-publish` commands plus the social-content skill to Claude Code. Works in any repo — just run `postree init` in each repo to create `.env` and `posts/`.
 
 ## Postiz Setup
 
