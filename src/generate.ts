@@ -169,7 +169,7 @@ RULES:
 - Maximum length: ${constraints.maxLength} characters per post
 - Format: ${formatGuide[constraints.format] ?? formatGuide.casual}
 - Do NOT include frontmatter or metadata
-- Do NOT use markdown formatting for Facebook (plain text only)
+- Do NOT use markdown formatting (no **bold**, no *italic*, no # headers) for LinkedIn, Facebook, Instagram, or any platform that renders plain text. Use emojis and line breaks instead.
 - Include relevant hashtags for ${platform}
 - Make it engaging and shareable${threadInstruction}
 

@@ -4,30 +4,35 @@ type: post
 schedule: 2026-03-30T15:00:00.000Z
 status: published
 ---
-Content creators and developers, here's a game-changer for your social media workflow.
+Tired of manually reformatting the same content for every social platform? Same.
 
-Meet PosTree - an open-source CLI tool that transforms how we approach multi-platform content distribution. Instead of manually adapting your articles, research papers, or release notes for each social platform, PosTree does the heavy lifting for you.
+That's why we built PosTree.
 
-Here's what makes it powerful:
+🌳 PosTree is an open-source CLI that generates platform-specific social media posts from your existing content — articles, papers, release notes, anything — and publishes them to 33+ platforms via Postiz.
 
-**Write Once, Post Everywhere**
-Convert your existing markdown content into platform-specific posts optimized for 33+ social media channels through Postiz integration.
+Here's how it works:
 
-**AI-Powered Adaptation**
-Leverages leading LLMs (Claude, GPT-4, Gemini) to intelligently reshape your content for each platform's unique audience and format requirements.
+📝 Write once in markdown
+🤖 LLM adapts it per platform (Claude, GPT-4, Gemini)
+📅 Schedule with natural language ("next monday 10am")
+🚀 Publish to LinkedIn, Twitter/X, Mastodon, Bluesky, Instagram, YouTube, TikTok, and more
 
-**Developer-Friendly Features**
-• Per-repository configuration with channel IDs
-• Natural language scheduling
-• Reliable delivery through Postiz Temporal
-• Simple npm installation: npm install -g @yonedaai/postree
+What makes it different:
 
-This addresses a real pain point for technical content creators who spend countless hours manually reformatting the same core message across platforms. Whether you're sharing research findings, product updates, or technical insights, PosTree streamlines the distribution process while maintaining content quality.
+- Per-repo config — each project gets its own posts/ directory and .env
+- Channel IDs auto-populated from your Postiz instance
+- Zero OAuth in PosTree — Postiz handles all the tokens
+- Postiz Temporal for reliable scheduled delivery
+- Works as a CLI or a Claude Code plugin
 
-The tool comes from YonedaAI Research Collective and represents a thoughtful approach to automating content workflows without losing the nuance each platform requires.
+Install in 30 seconds:
+npm install -g @yonedaai/postree
+postree init
+postree generate --from your-article.md --platforms linkedin,twitter
+postree publish
 
-For developers and content creators managing multiple channels, this could significantly reduce the friction between creating great content and getting it in front of your audience.
+Built by YonedaAI Research Collective.
 
-Check it out on GitHub: github.com/YonedaAI/PosTree
+github.com/YonedaAI/PosTree
 
-#ContentCreation #OpenSource #SocialMediaAutomation #DeveloperTools #ContentMarketing #TechTools #Productivity
+#OpenSource #DevTools #SocialMedia #ContentCreation #AI #TypeScript
