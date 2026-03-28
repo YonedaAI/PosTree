@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { buildGenerationPrompt, truncateForPlatform, PLATFORM_CONSTRAINTS, generatePosts } from './generate.js';
-import { Platform } from './types.js';
+type Platform = string;
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -117,9 +117,9 @@ describe('generatePosts', () => {
     fs.rmSync(tmpDir, { recursive: true });
   });
 
-  it('creates output files for each platform', () => {
+  it('creates output files for each platform', async () => {
     // execFileSync will fail since claude CLI is not available in tests, triggering fallback
-    const files = generatePosts({
+    const files = await generatePosts({
       source: sourceFile,
       platforms: ['twitter', 'linkedin'],
       outputDir,
@@ -130,8 +130,8 @@ describe('generatePosts', () => {
     expect(fs.existsSync(path.join(outputDir, 'linkedin-source.md'))).toBe(true);
   });
 
-  it('creates files with correct frontmatter', () => {
-    const files = generatePosts({
+  it('creates files with correct frontmatter', async () => {
+    const files = await generatePosts({
       source: sourceFile,
       platforms: ['twitter'],
       outputDir,
@@ -142,8 +142,8 @@ describe('generatePosts', () => {
     expect(content).toContain('status: pending');
   });
 
-  it('includes schedule date in frontmatter when provided', () => {
-    const files = generatePosts({
+  it('includes schedule date in frontmatter when provided', async () => {
+    const files = await generatePosts({
       source: sourceFile,
       platforms: ['twitter'],
       outputDir,
@@ -155,9 +155,9 @@ describe('generatePosts', () => {
     expect(content).toContain('schedule:');
   });
 
-  it('creates output directory if it does not exist', () => {
+  it('creates output directory if it does not exist', async () => {
     const nestedOut = path.join(tmpDir, 'nested', 'deep', 'output');
-    generatePosts({
+    await generatePosts({
       source: sourceFile,
       platforms: ['discord'],
       outputDir: nestedOut,
@@ -166,8 +166,8 @@ describe('generatePosts', () => {
     expect(fs.existsSync(nestedOut)).toBe(true);
   });
 
-  it('generates a valid post file regardless of claude CLI availability', () => {
-    const files = generatePosts({
+  it('generates a valid post file regardless of claude CLI availability', async () => {
+    const files = await generatePosts({
       source: sourceFile,
       platforms: ['discord'],
       outputDir,

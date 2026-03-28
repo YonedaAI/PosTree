@@ -1,291 +1,363 @@
 #!/usr/bin/env node
-import { loadConfig, getConfiguredPlatforms } from './config.js';
+import * as dotenv from 'dotenv';
 import { parsePostFile, discoverPosts } from './parser.js';
-import { StateManager } from './state.js';
-import { getAdapter } from './adapters/index.js';
-import { Post, Platform, PublishResult } from './types.js';
+import { Post } from './types.js';
 import * as path from 'node:path';
+import * as fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const VERSION = '0.1.0';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config();
+
+const VERSION = '0.3.3';
 
 async function main() {
   const args = process.argv.slice(2);
   const command = args[0];
 
   switch (command) {
-    case 'publish': return cmdPublish(args.slice(1));
-    case 'status': return cmdStatus(args.slice(1));
-    case 'dry-run': return cmdDryRun(args.slice(1));
-    case 'platforms': return cmdPlatforms();
-    case 'setup': return cmdSetup();
-    case 'schedule': return cmdSchedule(args.slice(1));
-    case 'generate': return cmdGenerate(args.slice(1));
-    case 'version': return console.log(`postree v${VERSION}`);
-    case 'help': return printHelp();
+    case 'init':      return cmdInit();
+    case 'generate':  return cmdGenerate(args.slice(1));
+    case 'publish':   return cmdPublish(args.slice(1));
+    case 'schedule':  return cmdSchedule(args.slice(1));
+    case 'list':      return cmdPostiz('posts:list', args.slice(1));
+    case 'delete':    return cmdPostiz('posts:delete', args.slice(1));
+    case 'upload':    return cmdPostiz('upload', args.slice(1));
+    case 'analytics': return cmdPostiz('analytics:post', args.slice(1));
+    case 'channels':  return cmdPostiz('integrations:list', args.slice(1));
+    case 'version':   return console.log(`postree v${VERSION}`);
+    case 'help':      return printHelp();
     default:
       if (!command) return printHelp();
-      console.error(`Unknown command: ${command}`);
+      console.error(`Unknown command: ${command}\nRun 'postree help' for usage.`);
       process.exit(1);
   }
 }
 
-function cmdSetup() {
+// ─── Config ─────────────────────────────────────────────────────
+
+function requirePostiz(): { apiKey: string; apiUrl: string } {
+  const apiKey = process.env.POSTIZ_API_KEY;
+  const apiUrl = process.env.POSTIZ_API_URL;
+  if (!apiKey || !apiUrl) {
+    console.error('Missing POSTIZ_API_KEY or POSTIZ_API_URL in .env');
+    console.error('Run `postree init` to set up this repo.');
+    process.exit(1);
+  }
+  return { apiKey, apiUrl };
+}
+
+function postizEnv(): Record<string, string> {
+  const { apiKey, apiUrl } = requirePostiz();
+  return { ...process.env as Record<string, string>, POSTIZ_API_KEY: apiKey, POSTIZ_API_URL: apiUrl };
+}
+
+function findPostizBin(): string {
+  // Look in node_modules relative to this script, then up the tree
+  const candidates = [
+    path.resolve(__dirname, '..', 'node_modules', '.bin', 'postiz'),
+    path.resolve(__dirname, '..', 'node_modules', 'postiz', 'dist', 'index.js'),
+    path.resolve(process.cwd(), 'node_modules', '.bin', 'postiz'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  // Last resort: global PATH
+  return 'postiz';
+}
+
+function postizExec(args: string[]): string {
+  const bin = findPostizBin();
+  const cmd = bin.endsWith('.js') ? process.execPath : bin;
+  const fullArgs = bin.endsWith('.js') ? [bin, ...args] : args;
+  return execFileSync(cmd, fullArgs, {
+    encoding: 'utf-8',
+    timeout: 30000,
+    env: postizEnv(),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
+}
+
+/**
+ * Get integration IDs for a platform from .env
+ * Supports: POSTIZ_LINKEDIN=id1,id2 (both accounts)
+ *           POSTIZ_LINKEDIN_PAGE=id1 (specific)
+ * Frontmatter platform value maps to env key: linkedin -> POSTIZ_LINKEDIN
+ *                                             linkedin_page -> POSTIZ_LINKEDIN_PAGE
+ * Falls back to runtime query if not in .env.
+ */
+function getChannelIds(platform: string): string[] {
+  // Try exact match first (e.g., linkedin_page -> POSTIZ_LINKEDIN_PAGE)
+  const exactKey = `POSTIZ_${platform.toUpperCase().replace(/-/g, '_')}`;
+  const exactVal = process.env[exactKey];
+  if (exactVal) return exactVal.split(',').map(s => s.trim()).filter(Boolean);
+
+  // Try base platform (e.g., linkedin_page -> POSTIZ_LINKEDIN)
+  const basePlatform = platform.split(/[-_]/)[0];
+  const baseKey = `POSTIZ_${basePlatform.toUpperCase()}`;
+  const baseVal = process.env[baseKey];
+  if (baseVal) return baseVal.split(',').map(s => s.trim()).filter(Boolean);
+
+  // Fallback: query integrations at runtime
+  try {
+    const raw = postizExec(['integrations:list']);
+    const jsonMatch = raw.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return [];
+    const integrations = JSON.parse(jsonMatch[0]);
+    const aliases: Record<string, string[]> = {
+      twitter: ['twitter', 'x'],
+      linkedin: ['linkedin', 'linkedin-page'],
+      facebook: ['facebook', 'facebook-page'],
+      instagram: ['instagram', 'instagram-standalone'],
+    };
+    const identifiers = aliases[platform] ?? [platform];
+    return integrations
+      .filter((i: any) => identifiers.some((id: string) => i.identifier.startsWith(id)))
+      .map((i: any) => i.id);
+  } catch { return []; }
+}
+
+// ─── Postiz Passthrough ─────────────────────────────────────────
+
+function cmdPostiz(postizCmd: string, args: string[]) {
+  requirePostiz();
+  try {
+    const result = postizExec([postizCmd, ...args]);
+    if (result) console.log(result);
+  } catch (err: any) {
+    if (err.stderr?.trim()) console.error(err.stderr.trim());
+    else if (err.stdout?.trim()) console.log(err.stdout.trim());
+    else console.error(`Failed: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+// ─── Init ───────────────────────────────────────────────────────
+
+async function cmdInit() {
+  if (!fs.existsSync('posts')) fs.mkdirSync('posts');
+
+  const hasEnv = fs.existsSync('.env');
+  const hasPostizKey = process.env.POSTIZ_API_KEY && process.env.POSTIZ_API_URL;
+
+  // If .env exists and has Postiz credentials, query integrations and update channel IDs
+  if (hasEnv && hasPostizKey) {
+    console.log('Querying Postiz for connected channels...\n');
+    try {
+      const raw = postizExec(['integrations:list']);
+      const jsonMatch = raw.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        const integrations = JSON.parse(jsonMatch[0]) as Array<{ id: string; name: string; identifier: string; profile: string; disabled: boolean }>;
+        const active = integrations.filter(i => !i.disabled);
+
+        if (active.length === 0) {
+          console.log('No channels connected in Postiz. Add them in your Postiz dashboard.\n');
+          return;
+        }
+
+        // Group by base platform
+        const grouped: Record<string, Array<{ id: string; name: string; identifier: string; profile: string }>> = {};
+        for (const i of active) {
+          const key = i.identifier.replace(/-/g, '_').toUpperCase();
+          if (!grouped[key]) grouped[key] = [];
+          grouped[key].push(i);
+        }
+
+        // Build channel lines
+        const channelLines: string[] = [];
+        for (const [key, channels] of Object.entries(grouped)) {
+          const ids = channels.map(c => c.id).join(',');
+          const names = channels.map(c => `${c.name} (@${c.profile})`).join(', ');
+          channelLines.push(`POSTIZ_${key}=${ids}  # ${names}`);
+        }
+
+        // Update .env — replace or append channel section
+        let envContent = fs.readFileSync('.env', 'utf-8');
+        // Remove old channel lines
+        envContent = envContent.replace(/^POSTIZ_(?!API_)[A-Z_]+=.*\n?/gm, '');
+        // Remove old channel comment block
+        envContent = envContent.replace(/^# Channel IDs.*\n(#.*\n)*/gm, '');
+        // Clean up extra blank lines
+        envContent = envContent.replace(/\n{3,}/g, '\n\n').trimEnd();
+
+        envContent += '\n\n# Channel IDs (auto-populated by postree init)\n';
+        envContent += channelLines.join('\n') + '\n';
+
+        fs.writeFileSync('.env', envContent);
+
+        console.log(`Found ${active.length} channel(s):\n`);
+        for (const i of active) {
+          console.log(`  + ${i.identifier} — ${i.name} (@${i.profile})`);
+        }
+        console.log(`\nChannel IDs written to .env`);
+      }
+    } catch (err: any) {
+      console.error(`Could not query Postiz: ${err.message}`);
+      console.log('Add channel IDs manually: run `postiz integrations:list`');
+    }
+
+    console.log('\nReady. Run `postree generate --from <file> --platforms <list>`');
+    return;
+  }
+
+  // Fresh init — create .env template
+  if (!hasEnv) {
+    fs.writeFileSync('.env', `# PosTree Configuration
+
+# Postiz (publishing gateway)
+# Deploy: https://railway.com/new/template/postiz-with-temporal
+POSTIZ_API_URL=
+POSTIZ_API_KEY=
+
+# LLM for content generation (at least one)
+ANTHROPIC_API_KEY=
+# OPENAI_API_KEY=
+# GEMINI_API_KEY=
+`);
+  }
+
   console.log(`
-PosTree Setup — Postiz Backend
-═══════════════════════════════
+PosTree initialized.
 
-Postiz is a free, open-source social media scheduler.
-PosTree uses it to handle all OAuth and platform connections.
+You need a Postiz instance to publish. Two options:
 
-STEP 1: Start Postiz (Docker required)
-───────────────────────────────────────
-  cd ${process.cwd()}/docker
-  docker-compose up -d
+  Railway (one click):
+    https://railway.com/new/template/postiz-with-temporal?projectId=8d6901cd-9865-4e39-8aea-446d1460fbbc
 
-  Wait ~30 seconds for startup.
+  Local Docker:
+    git clone https://github.com/gitroomhq/postiz-app && cd postiz-app
+    docker-compose -f docker/docker-compose.yml up -d
 
-STEP 2: Connect your social accounts
-─────────────────────────────────────
-  Open http://localhost:5000 in your browser
-  Create an account
-  Go to Settings → Integrations
-  Connect: Twitter, LinkedIn, Facebook, etc.
-  (Postiz handles all OAuth — just click and authorize)
-
-STEP 3: Get your API key
-─────────────────────────
-  In Postiz dashboard: Settings → API Keys → Generate
-  Copy the key
-
-STEP 4: Configure PosTree
-──────────────────────────
-  Add to your .env file:
-
-    POSTIZ_URL=http://localhost:3000
-    POSTIZ_API_KEY=your-key-here
-
-STEP 5: Test
-────────────
-  postree platforms        # Should show all connected platforms
-  postree dry-run posts/   # Preview posts
-  postree publish --file posts/test.md   # Test publish
-
-STEP 6: Schedule auto-publishing
-─────────────────────────────────
-  postree schedule 10am everyday
-
-Done! Postiz handles all the OAuth. PosTree handles the content.
+Then:
+  1. Open Postiz dashboard -> connect your social accounts
+  2. Settings -> API Keys -> generate a key
+  3. Edit .env with your POSTIZ_API_URL and POSTIZ_API_KEY
+  4. Run \`postree init\` again to auto-populate channel IDs
 `);
 }
 
-async function cmdPublish(args: string[]) {
-  const config = loadConfig();
-  const state = new StateManager();
-  const flags = parseFlags(args);
-
-  const platform = flags['platform'] as Platform | undefined;
-  const file = flags['file'];
-  const pending = args.includes('--pending');
-  const all = args.includes('--all');
-  const postsDir = flags['dir'] ?? 'posts';
-
-  let posts: Post[] = [];
-
-  if (file) {
-    posts = [parsePostFile(file)];
-  } else {
-    const files = discoverPosts(postsDir);
-    posts = files.map(parsePostFile);
-  }
-
-  if (platform) {
-    posts = posts.filter(p => p.platform === platform);
-  }
-
-  if (pending) {
-    const now = new Date().toISOString();
-    posts = posts.filter(p => {
-      if (state.isPublished(p.file, p.platform)) return false;
-      if (p.schedule && p.schedule > now) return false; // not yet scheduled
-      if (p.status === 'draft') return false;
-      return true;
-    });
-  }
-
-  if (posts.length === 0) {
-    console.log('No posts to publish.');
-    return;
-  }
-
-  console.log(`Publishing ${posts.length} post(s)...\n`);
-
-  for (const post of posts) {
-    const adapter = getAdapter(post.platform, config);
-    if (!adapter) {
-      console.log(`  [SKIP] ${post.platform} — no adapter or not configured`);
-      continue;
-    }
-    if (!adapter.isConfigured()) {
-      console.log(`  [SKIP] ${post.platform} — missing API keys`);
-      continue;
-    }
-    if (state.isPublished(post.file, post.platform)) {
-      console.log(`  [SKIP] ${post.platform} — already published: ${post.file}`);
-      continue;
-    }
-
-    console.log(`  [POST] ${post.platform} ← ${path.basename(post.file)}`);
-
-    let result: PublishResult;
-    try {
-      if (post.type === 'thread' && post.thread && adapter.postThread) {
-        result = await adapter.postThread(post.thread);
-      } else if (post.type === 'article' && post.title && adapter.postArticle) {
-        result = await adapter.postArticle(post.title, post.content, {
-          tags: post.tags, canonical_url: post.canonical_url
-        });
-      } else {
-        result = await adapter.post(post.content, {
-          tags: post.tags, subreddit: post.subreddit, channel: post.channel
-        });
-      }
-      result.file = post.file;
-    } catch (err) {
-      result = {
-        success: false,
-        error: err instanceof Error ? err.message : String(err),
-        platform: post.platform,
-        file: post.file,
-        publishedAt: new Date().toISOString(),
-      };
-    }
-
-    state.record(result);
-
-    if (result.success) {
-      console.log(`    ✓ Published: ${result.url ?? result.urls?.[0] ?? 'OK'}`);
-    } else {
-      console.log(`    ✗ Failed: ${result.error}`);
-    }
-  }
-
-  state.save();
-
-  const summary = state.getSummary();
-  console.log(`\nDone. Published: ${summary.published}, Failed: ${summary.failed}, Pending: ${summary.pending}`);
-}
-
-async function cmdStatus(_args: string[]) {
-  const state = new StateManager();
-  const entries = state.getAllEntries();
-
-  if (entries.length === 0) {
-    console.log('No publishing history. Run `postree publish` first.');
-    return;
-  }
-
-  console.log('Publishing Status:\n');
-  for (const entry of entries) {
-    const icon = entry.status === 'published' ? '✓' : entry.status === 'failed' ? '✗' : '○';
-    const url = entry.url ? ` → ${entry.url}` : '';
-    const err = entry.error ? ` (${entry.error})` : '';
-    console.log(`  ${icon} [${entry.platform}] ${path.basename(entry.file)}${url}${err}`);
-  }
-
-  const summary = state.getSummary();
-  console.log(`\nTotal: ${summary.published} published, ${summary.failed} failed, ${summary.pending} pending`);
-}
-
-async function cmdDryRun(args: string[]) {
-  const config = loadConfig();
-  const postsDir = args[0] ?? 'posts';
-  const files = discoverPosts(postsDir);
-  const configured = getConfiguredPlatforms(config);
-
-  console.log(`Configured platforms: ${configured.join(', ') || 'none'}\n`);
-  console.log(`Posts found in ${postsDir}/:\n`);
-
-  for (const file of files) {
-    const post = parsePostFile(file);
-    const hasAdapter = configured.includes(post.platform);
-    const icon = hasAdapter ? '✓' : '○';
-    console.log(`  ${icon} [${post.platform}] ${path.basename(file)} — ${post.type}${post.schedule ? ` @ ${post.schedule}` : ''}`);
-    if (post.thread) {
-      console.log(`    ${post.thread.length} parts in thread`);
-    }
-  }
-}
-
-function cmdPlatforms() {
-  const config = loadConfig();
-  const configured = getConfiguredPlatforms(config);
-
-  const ALL_PLATFORMS: Platform[] = ['twitter', 'mastodon', 'bluesky', 'linkedin', 'devto', 'medium', 'facebook', 'reddit', 'discord', 'discourse'];
-
-  console.log('Platform Status:\n');
-  for (const p of ALL_PLATFORMS) {
-    const ok = configured.includes(p);
-    console.log(`  ${ok ? '✓' : '○'} ${p}${ok ? '' : ' — not configured (missing API keys)'}`);
-  }
-}
+// ─── Generate ───────────────────────────────────────────────────
 
 async function cmdGenerate(args: string[]) {
   const flags = parseFlags(args);
-  const source = flags['from'] ?? flags['source'] ?? flags['text'] ?? args.find(a => !a.startsWith('--'));
+  const source = flags['from'] ?? flags['text'] ?? args.find(a => !a.startsWith('--'));
 
   if (!source) {
-    console.error(`Usage:
-  postree generate --from <file.md> [options]     Generate from a file
-  postree generate --text "your content" [options] Generate from raw text
-  postree generate --from <file> --llm openai     Use OpenAI instead of Claude
-  postree generate --from <file> --llm haiku      Use Claude Haiku (fast + cheap)
-  postree generate --from <file> --llm gemini     Use Gemini
-
-Options:
-  --platforms <list>  Comma-separated (default: twitter,linkedin,mastodon,bluesky)
-  --dir <path>        Output directory (default: posts/)
-  --schedule <date>   Base schedule date (ISO or "tomorrow")
-  --spread <days>     Spread posts over N days (default: 14)
-  --llm <provider>    claude, haiku, openai, gemini (default: auto-detect)
-  --model <name>      Specific model override
-  --name <base>       Base name for output files`);
+    console.error('Usage: postree generate --from <file> [--platforms list] [--llm provider]');
     process.exit(1);
   }
 
-  const platformsStr = flags['platforms'] ?? 'twitter,linkedin,mastodon,bluesky';
-  const platforms = platformsStr.split(',').map(s => s.trim()) as Platform[];
+  const platforms = (flags['platforms'] ?? 'twitter,linkedin,mastodon,bluesky').split(',').map(s => s.trim());
   const outputDir = flags['dir'] ?? 'posts';
-  const schedule = flags['schedule'];
-  const spreadDays = flags['spread'] ? parseInt(flags['spread']) : 14;
-  const llm = flags['llm'] as any;
-  const model = flags['model'];
-  const name = flags['name'];
 
-  const isFile = !flags['text'];
-  console.log(`Generating posts from: ${isFile ? source : '"' + source.slice(0, 60) + (source.length > 60 ? '...' : '') + '"'}`);
-  console.log(`Platforms: ${platforms.join(', ')}`);
-  console.log(`Output: ${outputDir}/\n`);
+  console.log(`Generating for: ${platforms.join(', ')}\n`);
 
   const { generatePosts } = await import('./generate.js');
-  const files = generatePosts({
-    source,
-    platforms,
-    outputDir,
-    schedule,
-    spreadDays,
-    llm,
-    model,
-    name,
+  const files = await generatePosts({
+    source, platforms, outputDir,
+    schedule: flags['schedule'],
+    spreadDays: flags['spread'] ? parseInt(flags['spread']) : 14,
+    llm: flags['llm'] as any,
+    model: flags['model'],
+    name: flags['name'],
   });
 
-  console.log(`\nGenerated ${files.length} posts.`);
-  console.log('Run `postree dry-run` to preview, or `postree publish --pending` to publish.');
+  console.log(`\nGenerated ${files.length} posts in ${outputDir}/`);
+  console.log('Review, then run `postree publish` to publish via Postiz.');
 }
+
+// ─── Publish ────────────────────────────────────────────────────
+
+async function cmdPublish(args: string[]) {
+  requirePostiz();
+
+  const flags = parseFlags(args);
+  const postsDir = flags['dir'] ?? 'posts';
+  const fileArg = flags['file'];
+  const platformFilter = flags['platform'];
+  const pending = args.includes('--pending');
+
+  // Check Postiz CLI
+  try { execFileSync('which', ['postiz'], { encoding: 'utf-8', stdio: 'pipe' }); } catch {
+    console.error('Postiz CLI not found. It should be bundled — try: npm install');
+    process.exit(1);
+  }
+
+  let posts: Post[] = [];
+  if (fileArg) {
+    posts = [parsePostFile(fileArg)];
+  } else {
+    posts = discoverPosts(postsDir).map(parsePostFile);
+  }
+
+  if (platformFilter) posts = posts.filter(p => p.platform === platformFilter);
+
+  // Filter to pending posts
+  const now = new Date().toISOString();
+  posts = posts.filter(p => {
+    if (p.status !== 'pending') return false;
+    if (pending && p.schedule && p.schedule > now) return false;
+    return true;
+  });
+
+  if (posts.length === 0) { console.log('No pending posts to publish.'); return; }
+
+  console.log(`Publishing ${posts.length} post(s) via Postiz...\n`);
+
+  let published = 0;
+
+  for (const post of posts) {
+    const ids = getChannelIds(post.platform);
+    if (ids.length === 0) {
+      console.log(`  [SKIP] ${post.platform} — no channel ID. Set POSTIZ_${post.platform.toUpperCase()}=<id> in .env`);
+      console.log(`         Run: postiz integrations:list`);
+      continue;
+    }
+
+    console.log(`  [POST] ${post.platform} <- ${path.basename(post.file)} (${ids.length} channel(s))`);
+
+    // Use post's schedule date, or 5s from now if none (Temporal requires schedule type)
+    const schedDate = post.schedule ?? new Date(Date.now() + 5000).toISOString();
+
+    try {
+      const result = postizExec([
+        'posts:create',
+        '-c', post.content,
+        '-s', schedDate,
+        '-t', 'schedule',
+        '-i', ids.join(','),
+      ]);
+
+      const jsonMatch = result.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        const created = JSON.parse(jsonMatch[0]);
+        for (const p of created) {
+          console.log(`    -> ${p.postId}`);
+        }
+      } else {
+        console.log(`    -> Scheduled`);
+      }
+
+      // Mark as published in frontmatter
+      const raw = fs.readFileSync(post.file, 'utf-8');
+      fs.writeFileSync(post.file, raw.replace(/status:\s*pending/, 'status: published'));
+      published++;
+    } catch (err: any) {
+      const msg = err.stderr?.trim() || err.stdout?.trim() || err.message;
+      console.log(`    x  Failed: ${msg}`);
+    }
+  }
+
+  console.log(`\nDone. Published: ${published}/${posts.length}`);
+}
+
+// ─── Schedule ───────────────────────────────────────────────────
 
 async function cmdSchedule(args: string[]) {
   const subcommand = args[0];
-  const postsDir = 'posts';
-  const projectPath = process.cwd();
 
   if (subcommand === 'assign') {
     const { assignSchedules } = await import('./scheduler.js');
@@ -300,139 +372,27 @@ async function cmdSchedule(args: string[]) {
     return;
   }
 
-  // If args look like a schedule spec, create the trigger
-  const timeArg = args.find(a => !a.startsWith('--'));
-  if (timeArg && timeArg !== 'list' && timeArg !== 'show') {
-    return createTrigger(args);
-  }
-
   if (subcommand === 'list') {
-    // List all posts with their schedule dates
-    const files = discoverPosts(postsDir);
-    const posts = files.map(parsePostFile);
-    const scheduled = posts.filter(p => p.schedule).sort((a, b) => (a.schedule ?? '').localeCompare(b.schedule ?? ''));
-
+    const postsDir = 'posts';
+    if (!fs.existsSync(postsDir)) { console.log('No posts/ directory.'); return; }
+    const posts = discoverPosts(postsDir).map(parsePostFile).filter(p => p.schedule);
+    posts.sort((a, b) => (a.schedule ?? '').localeCompare(b.schedule ?? ''));
     console.log('Scheduled Posts:\n');
-    for (const post of scheduled) {
-      const state = new StateManager();
-      const published = state.isPublished(post.file, post.platform);
-      const icon = published ? '\u2713' : '\u25CB';
-      console.log(`  ${icon} ${post.schedule} [${post.platform}] ${path.basename(post.file)}`);
+    for (const p of posts) {
+      const icon = p.status === 'published' ? '+' : 'o';
+      console.log(`  ${icon} ${p.schedule} [${p.platform}] ${path.basename(p.file)}`);
     }
-    if (scheduled.length === 0) console.log('  No scheduled posts. Add schedule: <datetime> to post frontmatter.');
+    if (posts.length === 0) console.log('  No scheduled posts.');
     return;
   }
 
-  if (subcommand === 'show') {
-    console.log('Claude Code Scheduled Trigger Configuration:\n');
-    console.log('The PosTree schedule uses Claude Code scheduled tasks.');
-    console.log('Claude runs `postree publish --pending` on your chosen schedule.\n');
-    console.log('Current project path:', projectPath);
-    console.log('Posts directory:', path.join(projectPath, postsDir));
-    return;
-  }
-
-  // Default: show setup guide
   console.log(`
-PosTree Schedule \u2014 Powered by Claude Code Scheduled Tasks
-
-PosTree doesn't run its own scheduler. Instead, Claude Code runs
-\`postree publish --pending\` on a cron schedule and reports results.
-
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-
-SETUP OPTION 1: Claude Code CLI
-\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-Run this in your terminal:
-
-  /schedule daily at 10am EST: cd ${projectPath} && npx postree publish --pending && npx postree status
-
-Claude will walk you through the setup conversationally.
-
-SETUP OPTION 2: Claude Code Desktop App
-\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-1. Open the Schedule page
-2. Click "New task" \u2192 "New remote task"
-3. Set schedule: Daily at 10:00 AM EST
-4. Set prompt:
-
-   cd ${projectPath}
-   Run: npx postree publish --pending
-   Then: npx postree status
-   Report results to Telegram.
-   If any posts failed, show the error and suggest a fix.
-
-SETUP OPTION 3: Claude Code Web
-\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-1. Visit claude.ai/code/scheduled
-2. Click "New scheduled task"
-3. Set prompt:
-
-   cd ${projectPath}
-   Run: npx postree publish --pending
-   Then: npx postree status
-   Report: what was published, what failed, what's coming up next.
-
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-
-HOW IT WORKS:
-  1. You write posts as markdown files with schedule dates in frontmatter
-  2. Claude's scheduled trigger fires (daily, hourly, whatever you set)
-  3. Claude runs \`postree publish --pending\`
-  4. PosTree checks: schedule <= now? status != published? adapter configured?
-  5. Posts that match get published to their platforms
-  6. State saved to .postree-state.json
-  7. Claude reports results via Telegram/Slack
-
-COMMANDS:
-  postree schedule            Show this setup guide
-  postree schedule list       List all scheduled posts with dates
-  postree schedule show       Show current trigger configuration
+postree schedule assign [--start tomorrow] [--spread 14] [--time 10:00] [--overwrite]
+postree schedule list
 `);
 }
 
-async function createTrigger(args: string[]) {
-  const flags = parseFlags(args);
-  const postsDir = flags['dir'] ?? flags['repo'] ?? 'posts';
-  const projectPath = process.cwd();
-  const fullPostsPath = path.resolve(projectPath, postsDir);
-
-  // Parse time specification
-  const timeSpec = args.filter(a => !a.startsWith('--')).join(' ');
-  // e.g., "10am everyday", "daily at 10am", "9am weekdays"
-
-  const schedulePrompt = `cd ${projectPath} && npx postree publish --pending --dir ${postsDir} && npx postree status`;
-
-  console.log('Creating Claude Code scheduled trigger...\n');
-  console.log(`  Schedule: ${timeSpec}`);
-  console.log(`  Posts dir: ${fullPostsPath}`);
-  console.log(`  Command: ${schedulePrompt}\n`);
-
-  // Try to invoke claude CLI to create the schedule
-  try {
-    const { execFileSync } = await import('node:child_process');
-
-    // Use claude CLI with /schedule command
-    const claudePrompt = `/schedule ${timeSpec}: ${schedulePrompt}. After publishing, report what was posted and any failures to Telegram.`;
-
-    console.log('Invoking Claude Code to create trigger...');
-    console.log(`  claude -p "${claudePrompt}"\n`);
-
-    const result = execFileSync('claude', ['-p', claudePrompt], {
-      encoding: 'utf-8',
-      timeout: 30000,
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
-
-    console.log('Trigger created successfully!');
-    console.log(result);
-  } catch (_err: any) {
-    // If claude CLI isn't available or fails, print manual instructions
-    console.log('Could not auto-create trigger. Run this manually in Claude Code:\n');
-    console.log(`  /schedule ${timeSpec}: ${schedulePrompt}\n`);
-    console.log('Or visit claude.ai/code/scheduled to set it up via web.');
-  }
-}
+// ─── Helpers ────────────────────────────────────────────────────
 
 function parseFlags(args: string[]): Record<string, string> {
   const flags: Record<string, string> = {};
@@ -447,50 +407,26 @@ function parseFlags(args: string[]): Record<string, string> {
 
 function printHelp() {
   console.log(`
-postree v${VERSION} — Plant your posts everywhere
+postree v${VERSION} -- Generate and publish social media content
 
-Usage:
-  postree publish [options]     Publish posts to platforms
-  postree publish --pending     Publish only unpublished posts
-  postree publish --all         Publish all posts
-  postree publish --platform X  Publish only to platform X
-  postree publish --file X      Publish a specific file
-  postree publish --dir X       Posts directory (default: posts/)
+Setup:
+  postree init                Set up repo (.env, channels, posts/)
 
-  postree generate [options]    Generate platform-specific posts via LLM
-    --from <file>               Source content file (paper, markdown, etc.)
-    --text "content"            Raw text input (instead of file)
-    --platforms <list>          Comma-separated (default: twitter,linkedin,mastodon,bluesky)
-    --llm <provider>            claude, haiku, openai, gemini (default: auto-detect)
-    --model <name>              Specific model override
-    --dir <path>               Output directory (default: posts/)
-    --schedule <date>          Base schedule date (ISO or "tomorrow")
-    --spread <days>            Spread posts over N days (default: 14)
-    --name <base>              Base name for output files
+Content:
+  postree generate --from <file> [--platforms list] [--llm provider]
+  postree generate --text "content" --platforms twitter,linkedin
+  postree publish [--pending] [--file X] [--dir X] [--platform X]
 
-  postree setup                  Set up Postiz backend (recommended)
+Schedule:
+  postree schedule assign [--start date] [--spread days] [--time HH:MM]
+  postree schedule list
 
-  postree status                Show publishing history
-  postree dry-run [dir]         Preview what would be published
-  postree platforms             Show configured platforms
-
-  postree schedule <time>       Create Claude Code auto-publish trigger
-    postree schedule 10am everyday
-    postree schedule "daily at 10am"
-  postree schedule assign       Auto-assign schedule dates to posts
-    --start <date>             Start date (default: tomorrow)
-    --spread <days>            Spread over N days (default: 14)
-    --time <HH:MM>             Time of day (default: 10:00)
-    --overwrite                Overwrite existing schedules
-  postree schedule list         List all scheduled posts
-  postree schedule show         Show trigger configuration
-
-  postree version               Show version
-  postree help                  Show this help
-
-Platforms: twitter, mastodon, bluesky, linkedin, devto, medium, facebook, reddit, discord, discourse
-
-Configure via .env file — see .env.example for all keys.
+Manage:
+  postree list [--startDate X --endDate Y]   List published posts
+  postree delete <post-id>                   Delete from platform
+  postree upload <file>                      Upload media
+  postree analytics <post-id>                Post engagement
+  postree channels                           Connected platforms
 `);
 }
 

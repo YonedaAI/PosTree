@@ -1,4 +1,4 @@
-import { Post, Platform } from './types.js';
+import { Post } from './types.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -12,18 +12,12 @@ export function parsePostFile(filePath: string): Post {
     : undefined;
 
   return {
-    platform: meta.platform as Platform,
+    platform: meta.platform ?? 'unknown',
     type: meta.type ?? (thread ? 'thread' : 'post'),
     schedule: meta.schedule,
     tags: meta.tags,
     status: meta.status ?? 'pending',
-    published_url: meta.published_url,
-    canonical_url: meta.canonical_url,
     title: meta.title,
-    subreddit: meta.subreddit,
-    channel: meta.channel,
-    instance_url: meta.instance_url,
-    category: meta.category,
     content: body,
     thread,
     file: filePath,

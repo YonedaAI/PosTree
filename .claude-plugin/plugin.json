@@ -1,0 +1,8 @@
+{
+  "name": "postree",
+  "version": "0.3.0",
+  "description": "Generate platform-specific social media posts from source content and publish via Postiz",
+  "author": {
+    "name": "YonedaAI Research Collective"
+  }
+}

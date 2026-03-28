@@ -1,102 +1,61 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { Platform } from './types.js';
-import { execFileSync } from 'node:child_process';
 
 export type LLMProvider = 'claude' | 'haiku' | 'openai' | 'gemini' | 'fallback';
 
 export interface GenerateOptions {
-  source: string;           // file path OR raw text
-  platforms: Platform[];
+  source: string;
+  platforms: string[];
   outputDir: string;
-  schedule?: string;
+  schedule?: string;       // natural language: "tomorrow", "next monday 10am", ISO date
   spreadDays?: number;
-  dryRun?: boolean;
-  llm?: LLMProvider;        // which LLM to use
-  model?: string;           // specific model override
-  name?: string;            // base name for output files
+  llm?: LLMProvider;
+  model?: string;
+  name?: string;
 }
 
-// Platform-specific constraints
-export const PLATFORM_CONSTRAINTS: Record<Platform, { maxLength: number; format: string; supportsThread: boolean; supportsArticle: boolean }> = {
-  twitter: { maxLength: 280, format: 'short', supportsThread: true, supportsArticle: false },
-  mastodon: { maxLength: 500, format: 'short', supportsThread: true, supportsArticle: false },
-  bluesky: { maxLength: 300, format: 'short', supportsThread: true, supportsArticle: false },
-  linkedin: { maxLength: 3000, format: 'professional', supportsThread: false, supportsArticle: false },
-  devto: { maxLength: 100000, format: 'article', supportsThread: false, supportsArticle: true },
-  medium: { maxLength: 100000, format: 'article', supportsThread: false, supportsArticle: true },
-  facebook: { maxLength: 63206, format: 'casual', supportsThread: false, supportsArticle: false },
-  reddit: { maxLength: 40000, format: 'technical', supportsThread: false, supportsArticle: false },
-  discord: { maxLength: 2000, format: 'short', supportsThread: false, supportsArticle: false },
-  discourse: { maxLength: 32000, format: 'technical', supportsThread: false, supportsArticle: false },
+// Platform constraints
+export const PLATFORM_CONSTRAINTS: Record<string, { maxLength: number; format: string; supportsThread: boolean; supportsArticle: boolean }> = {
+  twitter:   { maxLength: 280,    format: 'short',        supportsThread: true,  supportsArticle: false },
+  mastodon:  { maxLength: 500,    format: 'short',        supportsThread: true,  supportsArticle: false },
+  bluesky:   { maxLength: 300,    format: 'short',        supportsThread: true,  supportsArticle: false },
+  linkedin:  { maxLength: 3000,   format: 'professional', supportsThread: false, supportsArticle: false },
+  devto:     { maxLength: 100000, format: 'article',      supportsThread: false, supportsArticle: true },
+  medium:    { maxLength: 100000, format: 'article',      supportsThread: false, supportsArticle: true },
+  facebook:  { maxLength: 63206,  format: 'casual',       supportsThread: false, supportsArticle: false },
+  reddit:    { maxLength: 40000,  format: 'technical',    supportsThread: false, supportsArticle: false },
+  discord:   { maxLength: 2000,   format: 'short',        supportsThread: false, supportsArticle: false },
+  discourse: { maxLength: 32000,  format: 'technical',    supportsThread: false, supportsArticle: false },
+  instagram: { maxLength: 2200,   format: 'casual',       supportsThread: false, supportsArticle: false },
+  threads:   { maxLength: 500,    format: 'short',        supportsThread: true,  supportsArticle: false },
+  youtube:   { maxLength: 5000,   format: 'casual',       supportsThread: false, supportsArticle: false },
+  tiktok:    { maxLength: 2200,   format: 'short',        supportsThread: false, supportsArticle: false },
+  telegram:  { maxLength: 4096,   format: 'casual',       supportsThread: false, supportsArticle: false },
+  hashnode:  { maxLength: 100000, format: 'article',      supportsThread: false, supportsArticle: true },
+  wordpress: { maxLength: 100000, format: 'article',      supportsThread: false, supportsArticle: true },
+  slack:     { maxLength: 4000,   format: 'short',        supportsThread: false, supportsArticle: false },
+  pinterest: { maxLength: 500,    format: 'short',        supportsThread: false, supportsArticle: false },
 };
 
-/**
- * Resolve source: if it's a file path, read it. If it's raw text, use as-is.
- */
-function resolveSource(source: string): string {
-  // Check if it's a file path
-  try {
-    if (fs.existsSync(source)) {
-      return fs.readFileSync(source, 'utf-8');
-    }
-  } catch { /* not a file path */ }
+const DEFAULT_CONSTRAINT = { maxLength: 3000, format: 'casual', supportsThread: false, supportsArticle: false };
 
-  // It's raw text
-  return source;
+export function getConstraints(platform: string) {
+  return PLATFORM_CONSTRAINTS[platform] ?? DEFAULT_CONSTRAINT;
 }
 
-/**
- * Call an LLM to generate content.
- * Supports: claude, haiku (claude with haiku model), openai, gemini
- * Falls back gracefully if the LLM isn't available.
- */
-function callLLM(prompt: string, provider: LLMProvider, model?: string): string {
+// ─── LLM Providers ──────────────────────────────────────────────
+
+async function callLLM(prompt: string, provider: LLMProvider, model?: string): Promise<string> {
   switch (provider) {
     case 'claude':
-    case 'haiku': {
-      const args = ['-p', prompt];
-      if (provider === 'haiku') args.push('--model', model ?? 'claude-haiku-4-5-20251001');
-      else if (model) args.push('--model', model);
-      const result = execFileSync('claude', args, {
-        encoding: 'utf-8',
-        timeout: 90000,
-        maxBuffer: 2 * 1024 * 1024,
-      });
-      return result.trim();
-    }
+    case 'haiku':
+      return callClaude(prompt, provider === 'haiku' ? (model ?? 'claude-haiku-4-5-20251001') : model);
 
-    case 'openai': {
-      // Use OpenAI API via curl (requires OPENAI_API_KEY in env)
-      const apiKey = process.env.OPENAI_API_KEY;
-      if (!apiKey) throw new Error('OPENAI_API_KEY not set in environment');
-      const modelName = model ?? 'gpt-4o';
-      const body = JSON.stringify({
-        model: modelName,
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 4096,
-      });
-      const result = execFileSync('curl', [
-        '-s', 'https://api.openai.com/v1/chat/completions',
-        '-H', `Authorization: Bearer ${apiKey}`,
-        '-H', 'Content-Type: application/json',
-        '-d', body,
-      ], { encoding: 'utf-8', timeout: 90000 });
-      const parsed = JSON.parse(result);
-      if (parsed.error) throw new Error(parsed.error.message);
-      return parsed.choices[0].message.content.trim();
-    }
+    case 'openai':
+      return callOpenAI(prompt, model);
 
-    case 'gemini': {
-      // Use gemini CLI
-      const args = model ? ['-m', model, '-p', prompt] : ['-p', prompt];
-      const result = execFileSync('gemini', args, {
-        encoding: 'utf-8',
-        timeout: 90000,
-        maxBuffer: 2 * 1024 * 1024,
-      });
-      return result.trim();
-    }
+    case 'gemini':
+      return callGemini(prompt, model);
 
     case 'fallback':
       throw new Error('Fallback — no LLM called');
@@ -106,109 +65,94 @@ function callLLM(prompt: string, provider: LLMProvider, model?: string): string 
   }
 }
 
-/**
- * Detect which LLM providers are available on this system.
- */
+async function callClaude(prompt: string, model?: string): Promise<string> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set in .env');
+
+  const Anthropic = (await import('@anthropic-ai/sdk')).default;
+  const client = new Anthropic({ apiKey });
+  const response = await client.messages.create({
+    model: model ?? 'claude-sonnet-4-20250514',
+    max_tokens: 4096,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  const block = response.content[0];
+  return block.type === 'text' ? block.text.trim() : '';
+}
+
+async function callOpenAI(prompt: string, model?: string): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('OPENAI_API_KEY not set in .env');
+
+  const OpenAI = (await import('openai')).default;
+  const client = new OpenAI({ apiKey });
+  const response = await client.chat.completions.create({
+    model: model ?? 'gpt-4o',
+    messages: [{ role: 'user', content: prompt }],
+    max_tokens: 4096,
+  });
+  return response.choices[0]?.message?.content?.trim() ?? '';
+}
+
+async function callGemini(prompt: string, model?: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY not set in .env');
+
+  const { GoogleGenerativeAI } = await import('@google/generative-ai');
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const genModel = genAI.getGenerativeModel({ model: model ?? 'gemini-2.0-flash' });
+  const result = await genModel.generateContent(prompt);
+  return result.response.text().trim();
+}
+
+// ─── Provider Detection ─────────────────────────────────────────
+
 export function detectProviders(): LLMProvider[] {
   const available: LLMProvider[] = [];
-
-  try { execFileSync('which', ['claude'], { encoding: 'utf-8', stdio: 'pipe' }); available.push('claude', 'haiku'); } catch {}
-  try { execFileSync('which', ['gemini'], { encoding: 'utf-8', stdio: 'pipe' }); available.push('gemini'); } catch {}
+  if (process.env.ANTHROPIC_API_KEY) available.push('claude', 'haiku');
   if (process.env.OPENAI_API_KEY) available.push('openai');
-
+  if (process.env.GEMINI_API_KEY) available.push('gemini');
   available.push('fallback');
   return available;
 }
 
-export function generatePosts(options: GenerateOptions): string[] {
-  const { source, platforms, outputDir, schedule, spreadDays, llm, model, name } = options;
+// ─── Generation ─────────────────────────────────────────────────
 
-  // Resolve source: file path or raw text
-  const content = resolveSource(source);
-
-  // Pick LLM provider
-  const provider = llm ?? detectProviders()[0] ?? 'fallback';
-  console.log(`  LLM: ${provider}${model ? ` (${model})` : ''}`);
-
-  // Ensure output dir exists
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
-
-  const createdFiles: string[] = [];
-  const baseDate = schedule ? new Date(schedule) : new Date();
-  const baseName = name ?? deriveBaseName(source);
-
-  for (let i = 0; i < platforms.length; i++) {
-    const platform = platforms[i];
-    const constraints = PLATFORM_CONSTRAINTS[platform];
-
-    // Calculate schedule date (spread across days)
-    let scheduleDate: string | undefined;
-    if (schedule || spreadDays) {
-      const postDate = new Date(baseDate);
-      if (spreadDays) {
-        const dayOffset = Math.floor((i / platforms.length) * (spreadDays || 14));
-        postDate.setDate(postDate.getDate() + dayOffset);
+function resolveSource(source: string): string {
+  try {
+    if (fs.existsSync(source)) {
+      const stat = fs.statSync(source);
+      if (stat.isDirectory()) {
+        // Read all .md files in directory
+        return fs.readdirSync(source)
+          .filter(f => f.endsWith('.md'))
+          .map(f => fs.readFileSync(path.join(source, f), 'utf-8'))
+          .join('\n\n---\n\n');
       }
-      postDate.setHours(10, 0, 0, 0);
-      scheduleDate = postDate.toISOString();
+      return fs.readFileSync(source, 'utf-8');
     }
-
-    // Generate platform-specific content via LLM
-    const prompt = buildGenerationPrompt(content, platform, constraints);
-    let generatedContent: string;
-
-    try {
-      generatedContent = callLLM(prompt, provider, model);
-    } catch (_err) {
-      // Fallback: truncate source content for the platform
-      console.log(`  [WARN] ${provider} generation failed for ${platform}, using source content`);
-      generatedContent = truncateForPlatform(content, constraints);
-    }
-
-    // Build the post file with frontmatter
-    const type = constraints.supportsThread && generatedContent.includes('\n---\n') ? 'thread'
-      : constraints.supportsArticle ? 'article' : 'post';
-
-    const frontmatter = [
-      '---',
-      `platform: ${platform}`,
-      `type: ${type}`,
-      scheduleDate ? `schedule: ${scheduleDate}` : null,
-      `status: pending`,
-      '---',
-    ].filter(Boolean).join('\n');
-
-    const fileContent = `${frontmatter}\n${generatedContent}\n`;
-    const fileName = `${platform}-${baseName}.md`;
-    const filePath = path.join(outputDir, fileName);
-
-    fs.writeFileSync(filePath, fileContent);
-    createdFiles.push(filePath);
-
-    console.log(`  ✓ Generated ${platform} post → ${fileName}${scheduleDate ? ` (scheduled: ${scheduleDate.split('T')[0]})` : ''}`);
-  }
-
-  return createdFiles;
+  } catch { /* not a file path */ }
+  return source;
 }
 
-/**
- * Derive a base name for output files from the source.
- * File path → filename without extension. Raw text → "post".
- */
 function deriveBaseName(source: string): string {
   try {
     if (fs.existsSync(source)) {
+      const stat = fs.statSync(source);
+      if (stat.isDirectory()) return path.basename(source);
       return path.basename(source, path.extname(source));
     }
   } catch {}
   return 'generated';
 }
 
-export function buildGenerationPrompt(content: string, platform: Platform, constraints: { maxLength: number; format: string; supportsThread: boolean }): string {
+export function buildGenerationPrompt(
+  content: string,
+  platform: string,
+  constraints: { maxLength: number; format: string; supportsThread: boolean }
+): string {
   const threadInstruction = constraints.supportsThread
-    ? `\nIf the content is too long for a single post, split into a thread. Separate thread parts with "---" on its own line.`
+    ? '\nIf the content is too long for a single post, split into a thread. Separate thread parts with "---" on its own line.'
     : '';
 
   const formatGuide: Record<string, string> = {
@@ -223,7 +167,7 @@ export function buildGenerationPrompt(content: string, platform: Platform, const
 
 RULES:
 - Maximum length: ${constraints.maxLength} characters per post
-- Format: ${formatGuide[constraints.format]}
+- Format: ${formatGuide[constraints.format] ?? formatGuide.casual}
 - Do NOT include frontmatter or metadata
 - Do NOT use markdown formatting for Facebook (plain text only)
 - Include relevant hashtags for ${platform}
@@ -239,3 +183,117 @@ export function truncateForPlatform(content: string, constraints: { maxLength: n
   if (content.length <= constraints.maxLength) return content;
   return content.slice(0, constraints.maxLength - 3) + '...';
 }
+
+/** Resolve a natural language date to ISO string */
+function resolveScheduleDate(input: string, dayOffset: number = 0): string {
+  const d = new Date();
+
+  if (input === 'tomorrow') {
+    d.setDate(d.getDate() + 1);
+  } else if (input === 'today') {
+    // keep as-is
+  } else if (input.match(/^\d{4}-\d{2}-\d{2}/)) {
+    // ISO date
+    return new Date(new Date(input).getTime() + dayOffset * 86400000).toISOString();
+  } else {
+    // Natural language — best effort parse
+    // "next monday", "in 3 days", "april 5"
+    const lower = input.toLowerCase();
+    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const nextDay = days.findIndex(day => lower.includes(day));
+    if (nextDay >= 0) {
+      const today = d.getDay();
+      const diff = (nextDay - today + 7) % 7 || 7;
+      d.setDate(d.getDate() + diff);
+    } else if (lower.match(/in (\d+) days?/)) {
+      d.setDate(d.getDate() + parseInt(lower.match(/in (\d+) days?/)![1]));
+    } else {
+      // Try Date.parse as last resort
+      const parsed = new Date(input);
+      if (!isNaN(parsed.getTime())) return new Date(parsed.getTime() + dayOffset * 86400000).toISOString();
+      // Give up — use tomorrow
+      d.setDate(d.getDate() + 1);
+    }
+  }
+
+  // Extract time if specified (e.g., "tomorrow at 2pm", "next monday 10am")
+  const timeMatch = input.match(/(\d{1,2})\s*(am|pm)/i);
+  if (timeMatch) {
+    let hours = parseInt(timeMatch[1]);
+    if (timeMatch[2].toLowerCase() === 'pm' && hours < 12) hours += 12;
+    if (timeMatch[2].toLowerCase() === 'am' && hours === 12) hours = 0;
+    d.setHours(hours, 0, 0, 0);
+  } else {
+    d.setHours(10, 0, 0, 0); // default 10am
+  }
+
+  d.setDate(d.getDate() + dayOffset);
+  return d.toISOString();
+}
+
+export async function generatePosts(options: GenerateOptions): Promise<string[]> {
+  const { source, platforms, outputDir, schedule, spreadDays, llm, model, name } = options;
+
+  const content = resolveSource(source);
+  const provider = llm ?? detectProviders()[0] ?? 'fallback';
+  console.log(`  LLM: ${provider}${model ? ` (${model})` : ''}`);
+
+  if (provider === 'fallback') {
+    console.log('  No LLM API key found. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY in .env');
+    console.log('  Falling back to content truncation.\n');
+  }
+
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  const createdFiles: string[] = [];
+  const baseName = name ?? deriveBaseName(source);
+
+  for (let i = 0; i < platforms.length; i++) {
+    const platform = platforms[i];
+    const constraints = getConstraints(platform);
+
+    // Schedule date with spread
+    let scheduleDate: string | undefined;
+    if (schedule) {
+      const dayOffset = spreadDays ? Math.floor((i / platforms.length) * (spreadDays || 14)) : 0;
+      scheduleDate = resolveScheduleDate(schedule, dayOffset);
+    }
+
+    // Generate via SDK
+    const prompt = buildGenerationPrompt(content, platform, constraints);
+    let generatedContent: string;
+
+    try {
+      generatedContent = await callLLM(prompt, provider, model);
+    } catch (err: any) {
+      console.log(`  [WARN] ${provider} failed for ${platform}: ${err.message}`);
+      generatedContent = truncateForPlatform(content, constraints);
+    }
+
+    // Build post file
+    const type = constraints.supportsThread && generatedContent.includes('\n---\n') ? 'thread'
+      : constraints.supportsArticle ? 'article' : 'post';
+
+    const frontmatter = [
+      '---',
+      `platform: ${platform}`,
+      `type: ${type}`,
+      scheduleDate ? `schedule: ${scheduleDate}` : null,
+      `status: pending`,
+      '---',
+    ].filter(Boolean).join('\n');
+
+    const fileName = `${platform}-${baseName}.md`;
+    const filePath = path.join(outputDir, fileName);
+    fs.writeFileSync(filePath, `${frontmatter}\n${generatedContent}\n`);
+    createdFiles.push(filePath);
+
+    console.log(`  + ${platform} -> ${fileName}${scheduleDate ? ` (${scheduleDate.split('T')[0]})` : ''}`);
+  }
+
+  return createdFiles;
+}
+
+export { callLLM, resolveScheduleDate };

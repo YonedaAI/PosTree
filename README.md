@@ -1,180 +1,175 @@
 # PosTree
 
-**Plant your posts everywhere** — a multi-platform social media publishing CLI.
+**Generate social media posts from source content, publish via [Postiz](https://postiz.com).**
 
-Write posts as markdown with frontmatter. PosTree publishes them to 10 platforms.
-Claude Code schedules the publishing automatically.
+Write once, post to 33+ platforms. PosTree generates platform-specific content from articles, papers, or any text. Postiz handles OAuth, scheduling, and platform management.
 
-## Setup
+## How it works
 
-### Quick Start with Postiz (recommended)
-
-PosTree uses [Postiz](https://github.com/gitroomhq/postiz-app) — a free, open-source social media scheduler — to handle all platform authentication.
-
-```bash
-# 1. Start Postiz
-cd docker && docker-compose up -d
-
-# 2. Connect your social accounts
-open http://localhost:5000
-# → Settings → Integrations → Connect Twitter, LinkedIn, Facebook, etc.
-
-# 3. Get your API key
-# → Settings → API Keys → Generate
-
-# 4. Configure PosTree
-echo "POSTIZ_URL=http://localhost:3000" >> .env
-echo "POSTIZ_API_KEY=your-key" >> .env
-
-# 5. Test
-postree platforms
-postree publish --file posts/test.md
+```
+Source content (markdown, paper, text)
+  ↓
+postree generate → platform-specific posts in ./posts/
+  ↓
+postree publish → schedules via Postiz Temporal
+  ↓
+Postiz → LinkedIn, Twitter/X, Mastodon, Bluesky, Instagram, YouTube, TikTok, ...
 ```
 
-### Alternative: Direct API Keys
-
-If you prefer not to run Postiz, configure individual platform API keys in `.env`. See `.env.example` for all options.
-
-### Quick Start (CLI)
+## Install
 
 ```bash
-# Install
-npm install -g postree
+npm install -g @yonedaai/postree
+```
 
-# Preview what would be published
-postree dry-run posts/
+This installs both `postree` CLI and the bundled Postiz CLI.
 
-# Publish all pending posts
-postree publish --pending
+## Postiz Setup
 
-# Check status
-postree status
+PosTree requires a [Postiz](https://postiz.com) instance to publish. Two options:
 
-# Set up Claude auto-scheduling
-postree schedule
+### Railway (one click)
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template/postiz-with-temporal?projectId=8d6901cd-9865-4e39-8aea-446d1460fbbc)
+
+After deploy:
+1. Open your Postiz dashboard
+2. Connect your social accounts (LinkedIn, Twitter/X, etc.)
+3. Settings -> API Keys -> Generate a key
+
+### Local Docker
+
+```bash
+git clone https://github.com/gitroomhq/postiz-app && cd postiz-app
+docker-compose -f docker/docker-compose.yml up -d
+# Dashboard at http://localhost:5000
+```
+
+## Quick Start
+
+```bash
+# 1. Initialize repo
+cd my-project
+postree init
+# Edit .env: add POSTIZ_API_URL, POSTIZ_API_KEY, ANTHROPIC_API_KEY
+
+# 2. Run init again to auto-populate channel IDs
+postree init
+
+# 3. Generate posts from your content
+postree generate --from paper.md --platforms linkedin,twitter
+
+# 4. Review posts in ./posts/, then publish
+postree publish
+```
+
+## Commands
+
+### Content
+
+```bash
+# Generate from a file
+postree generate --from paper.md --platforms twitter,linkedin,mastodon
+
+# Generate from raw text
+postree generate --text "We just released v2.0" --platforms linkedin,twitter
+
+# Generate with scheduling
+postree generate --from paper.md --platforms linkedin --schedule "next monday 10am" --spread 7
+
+# Publish pending posts to Postiz
+postree publish
+
+# Publish specific file
+postree publish --file posts/linkedin-announcement.md
+```
+
+### Schedule
+
+```bash
+# Auto-assign dates to posts
+postree schedule assign --start tomorrow --spread 14 --time 10:00
+
+# List scheduled posts
+postree schedule list
+```
+
+### Manage
+
+```bash
+# List published posts
+postree list --startDate 2026-03-01 --endDate 2026-04-01
+
+# Delete a post from platform
+postree delete <post-id>
+
+# Upload media
+postree upload <file>
+
+# Post analytics
+postree analytics <post-id>
+
+# Connected platforms
+postree channels
 ```
 
 ## Post Format
 
-Posts are markdown files with YAML frontmatter:
+Posts are markdown files with YAML frontmatter in `./posts/`:
 
 ```markdown
 ---
-platform: twitter
-type: thread
-schedule: 2026-03-28T10:00:00Z
-tags: [programming, research]
+platform: linkedin
+type: post
 status: pending
+schedule: 2026-04-01T10:00:00Z
 ---
-First tweet in the thread.
-
----
-
-Second tweet continues here.
-
----
-
-Third tweet with the link.
-https://example.com
+Your post content here. #hashtags #included
 ```
-
-### Frontmatter Fields
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `platform` | Yes | twitter, mastodon, bluesky, linkedin, devto, medium, facebook, reddit, discord, discourse |
-| `type` | No | post (default), thread, article |
-| `schedule` | No | ISO datetime — post won't publish until this time |
-| `tags` | No | Tags/hashtags for the platform |
-| `status` | No | pending (default), draft, published, failed |
-| `title` | No | Article title (for Medium, Dev.to) |
-| `subreddit` | No | Target subreddit (for Reddit) |
-| `channel` | No | Target channel (for Discord) |
-| `instance_url` | No | Instance URL (for Mastodon, Discourse) |
-| `canonical_url` | No | Original URL (for cross-posts) |
-
-## Platforms
-
-| Platform | Auth Method | Threads | Articles | Setup |
-|----------|------------|---------|----------|-------|
-| Twitter/X | OAuth 1.0a | Yes | No | [developer.twitter.com](https://developer.twitter.com) |
-| Mastodon | Bearer token | Yes | No | Instance Settings → Development |
-| Bluesky | App password | Yes | No | Settings → App Passwords |
-| LinkedIn | OAuth 2.0 | No | No | [developer.linkedin.com](https://developer.linkedin.com) |
-| Dev.to | API key | No | Yes | [dev.to/settings/extensions](https://dev.to/settings/extensions) |
-| Medium | Integration token | No | Yes | Settings → Integration tokens |
-| Facebook | Page token | No | No | [developers.facebook.com](https://developers.facebook.com) |
-| Reddit | OAuth 2.0 | No | No | [reddit.com/prefs/apps](https://reddit.com/prefs/apps) |
-| Discord | Webhook URL | No | No | Channel Settings → Integrations |
-| Discourse | API key | No | No | Admin → API Keys |
-
-## Commands
-
-```
-postree publish [options]      Publish posts
-  --pending                    Only unpublished + scheduled posts
-  --all                        All posts regardless of status
-  --platform <name>            Only this platform
-  --file <path>                Only this file
-  --dir <path>                 Posts directory (default: posts/)
-
-postree status                 Show publishing history
-postree dry-run [dir]          Preview without publishing
-postree platforms              Show configured platforms
-postree schedule               Set up Claude auto-scheduling
-postree schedule list          List scheduled posts
-postree version                Show version
-postree help                   Show help
-```
-
-## Scheduling with Claude Code
-
-PosTree doesn't run its own cron. Instead, **Claude Code** runs `postree publish --pending` on a schedule and reports results.
-
-### Setup (pick one)
-
-**CLI:**
-```
-/schedule daily at 10am: cd /path/to/project && npx postree publish --pending && npx postree status
-```
-
-**Desktop App:** Schedule page → New remote task → set prompt and cron
-
-**Web:** claude.ai/code/scheduled → New scheduled task
-
-### How It Works
-
-1. You write posts as `.md` files with `schedule:` dates
-2. Claude's trigger fires on your chosen schedule
-3. PosTree checks: `schedule <= now` AND `status != published`
-4. Matching posts get published to their platforms
-5. State saved to `.postree-state.json`
-6. Claude reports results to Telegram/Slack
 
 ## Configuration
 
-**With Postiz (recommended):** Run `postree setup` for guided instructions. One Docker container handles all platforms.
+`postree init` creates a `.env` file per repo:
 
-**Without Postiz:** Copy `.env.example` to `.env` and add individual platform API keys:
+```env
+# Postiz instance
+POSTIZ_API_URL=https://your-instance.up.railway.app/api
+POSTIZ_API_KEY=your-key
 
-```bash
-cp .env.example .env
+# LLM for content generation (at least one)
+ANTHROPIC_API_KEY=your-key
+# OPENAI_API_KEY=
+# GEMINI_API_KEY=
+
+# Channel IDs (auto-populated by postree init)
+POSTIZ_LINKEDIN_PAGE=cmn8vidxv...  # YonedaAI
+POSTIZ_LINKEDIN=cmn8e2qzg...      # Matthew Long
 ```
 
-Only configure the platforms you want to use. PosTree skips unconfigured platforms.
+Channel IDs are auto-populated when you run `postree init` with valid Postiz credentials.
 
-## Development
+## Claude Code Plugin
 
-```bash
-npm install          # Install dependencies
-npm test             # Run tests
-npm run build        # Compile TypeScript
+PosTree also works as a Claude Code plugin for conversational content creation:
+
 ```
+You: write a linkedin post about our new release, schedule tomorrow 10am
+Claude: [generates post, saves to ./posts/, offers to publish]
+```
+
+## Architecture
+
+PosTree generates content. Postiz manages everything else.
+
+| PosTree | Postiz |
+|---------|--------|
+| LLM content generation | OAuth for 33+ platforms |
+| Platform-specific formatting | Temporal scheduling |
+| Schedule spreading | Publishing, delete, analytics |
+| Per-repo markdown posts | Media upload |
+
+**Zero OAuth in PosTree.** Postiz holds all tokens and handles all platform APIs.
 
 ## License
 
-MIT
-
-## Author
-
-**Matthew Long** — [YonedaAI Research Collective](https://github.com/YonedaAI)
+MIT — [YonedaAI Research Collective](https://github.com/YonedaAI)
