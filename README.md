@@ -1,8 +1,8 @@
 # PosTree
 
-**Generate social media posts from source content, publish via [Postiz](https://postiz.com).**
+**Generate social media posts from source content, publish to 33+ platforms via [Postiz](https://postiz.com).**
 
-Write once, post to 33+ platforms. PosTree generates platform-specific content from articles, papers, or any text. Postiz handles OAuth, scheduling, and platform management.
+Write once, post everywhere. PosTree generates platform-specific content from articles, papers, or any text using LLMs (Claude, GPT-4, Gemini). Postiz handles OAuth, scheduling via Temporal, and platform management.
 
 ## How it works
 
@@ -11,9 +11,11 @@ Source content (markdown, paper, text)
   ↓
 postree generate → platform-specific posts in ./posts/
   ↓
-postree publish → schedules via Postiz Temporal
+postree publish → sends to Postiz with schedule dates
   ↓
-Postiz → LinkedIn, Twitter/X, Mastodon, Bluesky, Instagram, YouTube, TikTok, ...
+Postiz Temporal → publishes at scheduled time
+  ↓
+LinkedIn, Twitter/X, Mastodon, Bluesky, Instagram, YouTube, TikTok, ...
 ```
 
 ## Install
@@ -53,7 +55,7 @@ cd my-project
 postree init
 # Edit .env: add POSTIZ_API_URL, POSTIZ_API_KEY, ANTHROPIC_API_KEY
 
-# 2. Run init again to auto-populate channel IDs
+# 2. Run init again to auto-populate channel IDs from Postiz
 postree init
 
 # 3. Generate posts from your content
@@ -65,24 +67,43 @@ postree publish
 
 ## Commands
 
-### Content
+### Generate
 
 ```bash
-# Generate from a file
+# From a file
 postree generate --from paper.md --platforms twitter,linkedin,mastodon
 
-# Generate from raw text
+# From raw text
 postree generate --text "We just released v2.0" --platforms linkedin,twitter
 
-# Generate with scheduling
-postree generate --from paper.md --platforms linkedin --schedule "next monday 10am" --spread 7
+# With scheduling (natural language)
+postree generate --from paper.md --platforms linkedin,twitter --schedule "next monday 10am" --spread 7
+```
 
-# Publish pending posts to Postiz
+### Schedule
+
+```bash
+# Auto-assign dates to existing posts in ./posts/
+postree schedule assign --start tomorrow --spread 14 --time 10:00
+
+# List scheduled posts
+postree schedule list
+```
+
+### Publish
+
+```bash
+# Publish all pending posts (sends to Postiz with schedule dates)
 postree publish
 
 # Publish specific file
 postree publish --file posts/linkedin-announcement.md
+
+# Only posts whose schedule has passed
+postree publish --pending
 ```
+
+Posts with a `schedule:` date are sent to Postiz Temporal, which publishes them at the scheduled time. Posts without a schedule are published immediately (5s delay for Temporal).
 
 ### Manage
 
@@ -112,10 +133,12 @@ Posts are markdown files with YAML frontmatter in `./posts/`:
 platform: linkedin
 type: post
 status: pending
-schedule: 2026-04-01T10:00:00Z
+schedule: 2026-04-01T15:00:00Z
 ---
 Your post content here. #hashtags #included
 ```
+
+Platform values: `linkedin`, `linkedin_page`, `twitter`, `mastodon`, `bluesky`, `instagram`, `facebook`, `youtube`, `tiktok`, `threads`, `reddit`, `discord`, `telegram`, `devto`, `medium`, `hashnode`, `wordpress`, `pinterest`, `slack`, and more.
 
 ## Configuration
 
@@ -141,12 +164,30 @@ Channel IDs are auto-populated when you run `postree init` with valid Postiz cre
 
 ## Claude Code Plugin
 
-PosTree also works as a Claude Code plugin for conversational content creation:
+PosTree includes a Claude Code plugin for conversational content creation. When working in a repo with PosTree:
 
 ```
-You: write a linkedin post about our new release, schedule tomorrow 10am
-Claude: [generates post, saves to ./posts/, offers to publish]
+You: create linkedin and twitter posts about our JAPL v0.1 release,
+     schedule starting next monday, spread across the week
+
+Claude: [reads platform constraints from plugin]
+        [generates platform-specific posts]
+        [writes to ./posts/ with schedule dates]
+
+        Created:
+          posts/linkedin-japl-release.md  (Mon 10am)
+          posts/twitter-japl-release.md   (Wed 10am)
+
+        Want me to publish?
+
+You: yes
+
+Claude: [runs postree publish]
+        Published 2 posts via Postiz.
+        LinkedIn scheduled for Mon, Twitter for Wed.
 ```
+
+The plugin provides skills for platform constraints and commands for `/postree` and `/postree-publish`.
 
 ## Architecture
 
@@ -154,9 +195,10 @@ PosTree generates content. Postiz manages everything else.
 
 | PosTree | Postiz |
 |---------|--------|
-| LLM content generation | OAuth for 33+ platforms |
+| LLM content generation (Claude, GPT-4, Gemini) | OAuth for 33+ platforms |
 | Platform-specific formatting | Temporal scheduling & publishing |
-| Per-repo markdown posts | Delete, analytics, media upload |
+| Natural language scheduling | Platform-side delete |
+| Per-repo markdown posts | Analytics, media upload |
 
 **Zero OAuth in PosTree.** Postiz holds all tokens and handles all platform APIs.
 
