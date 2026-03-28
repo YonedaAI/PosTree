@@ -142,8 +142,9 @@ ANTHROPIC_API_KEY=your-key
 # GEMINI_API_KEY=
 
 # Channel IDs (auto-populated by postree init)
-POSTIZ_LINKEDIN_PAGE=cmn8vidxv...  # YonedaAI
-POSTIZ_LINKEDIN=cmn8e2qzg...      # Matthew Long
+# POSTIZ_LINKEDIN=abc123...
+# POSTIZ_LINKEDIN_PAGE=def456...
+# POSTIZ_TWITTER=ghi789...
 ```
 
 Channel IDs are auto-populated when you run `postree init` with valid Postiz credentials.
