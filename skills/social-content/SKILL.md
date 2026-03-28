@@ -1,7 +1,7 @@
 ---
 name: social-content
 description: Use when the user asks to create social media posts, generate posts for platforms, adapt content for social media, write tweets from articles, create threads, or schedule social posts. Also triggered by mentions of PosTree, cross-platform posting, or social media content generation.
-version: 0.3.0
+version: 0.3.4
 ---
 
 # Social Content Generation
