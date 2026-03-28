@@ -84,16 +84,6 @@ postree publish
 postree publish --file posts/linkedin-announcement.md
 ```
 
-### Schedule
-
-```bash
-# Auto-assign dates to posts
-postree schedule assign --start tomorrow --spread 14 --time 10:00
-
-# List scheduled posts
-postree schedule list
-```
-
 ### Manage
 
 ```bash
@@ -165,9 +155,8 @@ PosTree generates content. Postiz manages everything else.
 | PosTree | Postiz |
 |---------|--------|
 | LLM content generation | OAuth for 33+ platforms |
-| Platform-specific formatting | Temporal scheduling |
-| Schedule spreading | Publishing, delete, analytics |
-| Per-repo markdown posts | Media upload |
+| Platform-specific formatting | Temporal scheduling & publishing |
+| Per-repo markdown posts | Delete, analytics, media upload |
 
 **Zero OAuth in PosTree.** Postiz holds all tokens and handles all platform APIs.
 

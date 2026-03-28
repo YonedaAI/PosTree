@@ -1,7 +1,7 @@
 ---
 platform: linkedin
 type: post
-schedule: 2026-03-28T15:00:00.000Z
+schedule: 2026-03-30T15:00:00.000Z
 status: published
 ---
 Content creators and developers, here's a game-changer for your social media workflow.
