@@ -12,7 +12,7 @@ const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
-const VERSION = '0.3.5';
+const VERSION = '0.3.6';
 
 async function main() {
   const args = process.argv.slice(2);
