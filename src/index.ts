@@ -12,7 +12,7 @@ const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
-const VERSION = '0.3.6';
+const VERSION = '0.3.7';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -345,8 +345,8 @@ async function cmdPublish(args: string[]) {
       }
     }
 
-    // Auto-detect OG image from URLs in content if no image specified
-    if (!imageUrl) {
+    // Auto-detect OG image only when image: auto in frontmatter
+    if (!imageUrl && post.image === 'auto') {
       const urlMatch = post.content.match(/https?:\/\/[^\s]+/);
       if (urlMatch) {
         try {
